@@ -1,0 +1,87 @@
+# Quality gate for pull requests and the default branch. Every project check
+# runs inside the repository's Docker image, so the runner host never installs
+# npm dependencies. `scripts/ci.sh` runs the same checks locally.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # Superseded pull request runs are cancelled; default-branch runs always finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    name: Checks (linux/${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          # Docker Desktop on Apple Silicon runs linux/arm64 containers.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      TASKBOARDS_CI_IMAGE: agent-taskboards:ci
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Building the image is itself a check. Layers, including the `npm ci`
+      # layer keyed on package-lock.json, are cached per architecture.
+      - name: Build Docker image
+        id: image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          push: false
+          tags: ${{ env.TASKBOARDS_CI_IMAGE }}
+          cache-from: type=gha,scope=ci-${{ matrix.arch }}
+          cache-to: type=gha,scope=ci-${{ matrix.arch }},mode=max
+
+      # Each check runs whenever the image built, so one failure does not hide
+      # the others.
+      - name: Typecheck
+        if: ${{ !cancelled() && steps.image.outcome == 'success' }}
+        run: scripts/ci.sh --no-build typecheck
+
+      - name: Lint
+        if: ${{ !cancelled() && steps.image.outcome == 'success' }}
+        run: scripts/ci.sh --no-build lint
+
+      - name: Test
+        if: ${{ !cancelled() && steps.image.outcome == 'success' }}
+        run: scripts/ci.sh --no-build test
+
+      - name: Production build
+        if: ${{ !cancelled() && steps.image.outcome == 'success' }}
+        run: scripts/ci.sh --no-build build
+
+  compose-config:
+    name: Compose configuration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check release configuration matrix
+        run: scripts/ci.sh --no-build compose-config

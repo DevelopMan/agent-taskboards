@@ -84,6 +84,18 @@ Scripts are defined in `package.json` and are intended to run inside Docker:
 - `npm run lint`: runs ESLint
 - `npm run test`: runs Vitest
 
+## Continuous Integration
+
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main` for
+`linux/amd64` and `linux/arm64`. It builds the Docker image, then runs
+typecheck, lint, the full Vitest suite, and the production build inside that
+image, plus `scripts/check-compose-config.sh` on the host. The runner never
+installs npm dependencies, and CI never needs the embedding model.
+
+`scripts/ci.sh [check...]` runs the same checks locally through Docker; the
+workflow calls it too, so keep both in sync. The Dockerfile uses `npm ci`, so
+commit `package-lock.json` changes together with `package.json` changes.
+
 ## TypeScript Notes
 
 The shared `tsconfig.json` covers both API and UI code. The API build uses

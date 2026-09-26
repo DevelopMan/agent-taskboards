@@ -6,6 +6,14 @@ Important changes to Agent Taskboards are documented in this file.
 
 ### 2026-09-26
 
+- **Continuous integration** (`add-continuous-integration-for-tbsg8t`): A
+  GitHub Actions workflow runs on pull requests and pushes to `main` for
+  `linux/amd64` and `linux/arm64`. It builds the Docker image with cached
+  layers, then runs typecheck, lint, the full test suite, and the production
+  build inside the image, and validates the Compose configuration matrix. No
+  dependencies are installed on the runner and the embedding model is not
+  required. `scripts/ci.sh` runs the same checks locally, and the Dockerfile now
+  installs dependencies with `npm ci` so images match `package-lock.json`.
 - **Parameterized Docker release startup**
   (`parameterize-docker-release-startup-zeu90q`): The published port, bind
   address, data and uploads directories, and embedding model directory and file

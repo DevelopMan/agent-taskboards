@@ -239,6 +239,16 @@ Build the app:
 docker compose exec taskboards npm run build
 ```
 
+Run the continuous integration checks exactly as GitHub Actions runs them. The
+script builds the Docker image, then runs typecheck, lint, tests, and the
+production build in throwaway containers, plus the Compose configuration check.
+It needs no running app and no embedding model:
+
+```sh
+scripts/ci.sh
+scripts/ci.sh test lint
+```
+
 Rebuild local embedding search data:
 
 ```sh

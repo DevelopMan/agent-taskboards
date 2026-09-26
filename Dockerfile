@@ -11,7 +11,8 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+# Strict install from package-lock.json so local and CI images match.
+RUN npm ci
 
 COPY . .
 
