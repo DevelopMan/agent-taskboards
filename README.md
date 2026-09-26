@@ -130,7 +130,8 @@ always sees `/data/taskboards.sqlite`, `/uploads`, and
 rate limiting. With `TASKBOARDS_BIND_ADDRESS=0.0.0.0`, anyone who can reach
 your machine on the network can read and change every board. Keep the default
 loopback binding unless you trust the whole network, and prefer an SSH tunnel
-or a reverse proxy with authentication for remote access.
+or a reverse proxy with authentication for remote access. See
+[SECURITY.md](SECURITY.md) for the full security model.
 
 `scripts/check-compose-config.sh` renders the default, custom-port,
 custom-storage, custom-model, and LAN configurations with
@@ -334,6 +335,23 @@ Useful starting points:
   comment content.
 
 See [docs/api.md](docs/api.md) for the full API contract.
+
+## Security
+
+Agent Taskboards is single-user by design: the API and UI have no
+authentication, so the app is safe on the default `127.0.0.1` binding and
+exposed to anyone on the network when bound to `0.0.0.0`. Data stays on your
+machine and there is no telemetry. [SECURITY.md](SECURITY.md) describes the
+security model, the localhost-versus-LAN boundary, and how to report a
+vulnerability privately.
+
+## Contributing
+
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the
+Docker-based development setup, how to run the CI checks locally with
+`scripts/ci.sh`, and pull-request expectations. For bugs, setup problems, and
+agent-integration feedback, use the issue templates in GitHub's new-issue
+flow.
 
 ## Documentation
 

@@ -1,0 +1,75 @@
+name: Bug report
+description: Something in Agent Taskboards misbehaves or breaks.
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Before you start: **do not paste real task
+        content, credentials, `.env` values, or files from `data/` (the
+        SQLite database)**. Redact command output and logs before sharing.
+        Setup and first-run problems have their own
+        [setup help template](https://github.com/WarehouseRobotics/agent-taskboards/issues/new?template=setup-help.yml).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What went wrong, and what did you expect instead?
+      placeholder: Dragging a selected block of tasks into the done column drops only the first task...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Start from a fresh board where possible, using synthetic task data.
+      placeholder: |
+        1. Create a board with two columns...
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system and architecture
+      options:
+        - macOS (Apple Silicon)
+        - Linux (x86-64)
+        - Other (describe below)
+    validations:
+      required: true
+  - type: input
+    id: docker-versions
+    attributes:
+      label: Docker and Compose versions
+      description: Output of `docker --version` and `docker compose version`.
+      placeholder: Docker 27.3.1, Docker Compose v2.30.3
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Run mode
+      description: Debug is the default (`TASKBOARDS_DEBUG=1`); release runs the compiled server.
+      options:
+        - Debug (default)
+        - Release
+        - Both
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log excerpt (redacted)
+      description: Trim `docker compose` output to the relevant lines and redact anything private.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: This report contains no real task content, credentials, `.env` values, or database files.
+          required: true

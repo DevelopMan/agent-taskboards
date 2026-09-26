@@ -4,6 +4,19 @@ Important changes to Agent Taskboards are documented in this file.
 
 ## Released
 
+### 2026-09-27
+
+- **Contributor, support, and security guidance**
+  (`add-contributor-support-and-w2r4tw`): `CONTRIBUTING.md` documents the
+  Docker-based development workflow, local CI via `scripts/ci.sh`, and
+  pull-request expectations. `SECURITY.md` states the single-user, no-auth
+  security model, explains why localhost is the safe default and LAN exposure
+  is an explicit operator decision, and routes vulnerability reports through
+  GitHub private vulnerability reporting. GitHub issue forms for bug reports,
+  setup help, and agent-integration feedback collect platform and version
+  diagnostics while explicitly excluding task content, credentials, and
+  database files. The README links the new security and contributing guidance.
+
 ### 2026-09-26
 
 - **Continuous integration** (`add-continuous-integration-for-tbsg8t`): A

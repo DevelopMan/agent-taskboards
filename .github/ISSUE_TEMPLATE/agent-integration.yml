@@ -1,0 +1,55 @@
+name: Agent integration feedback
+description: Friction or failures when driving Agent Taskboards from a coding agent — the skill wrapper, the HTTP API, or the prompt library.
+labels:
+  - agent-integration
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you start: **do not paste real task content, credentials,
+        `.env` values, or files from `data/` (the SQLite database)**. Use
+        synthetic task titles and redact wrapper or API output before
+        sharing.
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Which agent?
+      options:
+        - Claude Code
+        - Codex
+        - Other agent via the generic wrapper or HTTP API
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Integration surface
+      options:
+        - "`taskboards` skill wrapper script"
+        - HTTP API (`/api` or `/api/agents`)
+        - Prompt library / prompt picker
+        - Other (describe below)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What the agent tried to do, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: call-output
+    attributes:
+      label: Wrapper command or API call, with output (redacted)
+      description: The exact `taskboards ...` invocation or HTTP request, plus the response, trimmed and redacted.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: This report contains no real task content, credentials, `.env` values, or database files.
+          required: true
