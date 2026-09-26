@@ -60,7 +60,7 @@ Current stable error codes:
 
 `GET /api/health`
 
-Returns API and database status:
+Returns API, database, and embedding model status:
 
 ```json
 {
@@ -72,9 +72,17 @@ Returns API and database status:
       "applied": [],
       "skipped": ["0000_initial_schema.sql"]
     }
+  },
+  "embedding": {
+    "modelPath": "/models/bge-small-en-v1.5-f32.gguf",
+    "available": true
   }
 }
 ```
+
+`embedding.modelPath` is the resolved `TASKBOARDS_EMBEDDING_MODEL_PATH` and
+`embedding.available` reports whether that file exists. The API starts without
+the model; semantic search and indexing fail until it is present.
 
 ## Maintenance Storage
 

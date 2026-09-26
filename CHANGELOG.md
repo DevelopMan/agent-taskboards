@@ -4,6 +4,20 @@ Important changes to Agent Taskboards are documented in this file.
 
 ## Released
 
+### 2026-09-26
+
+- **Parameterized Docker release startup**
+  (`parameterize-docker-release-startup-zeu90q`): The published port, bind
+  address, data and uploads directories, and embedding model directory and file
+  are now Compose variables with safe defaults, documented in `.env.example`.
+  The published port binds to `127.0.0.1` unless LAN exposure is chosen
+  explicitly, the model directory is mounted read-only at `/models`, and
+  `GET /api/health` reports the resolved embedding model path and whether the
+  file exists. `scripts/check-compose-config.sh` validates the default,
+  custom-port, custom-storage, custom-model, and LAN configurations. The Docker
+  build context now excludes runtime data, uploads, scratch files, SQLite
+  files, and `.env`, so release images no longer embed the local database.
+
 ### 2026-09-24
 
 - **Block drag-reorder for selected tasks** (`allow-drag-reorder-for-eb5o0y`):

@@ -25,14 +25,22 @@ For development, keep the GGUF model on the host at:
 models-gguf/bge-small-en-v1.5-f32.gguf
 ```
 
-The Compose bind mount exposes that file inside the running container at the
-same `/app/models-gguf/...` path. The directory is ignored by git and Docker
-build context so model weights stay local.
+Compose mounts the host model directory read-only at `/models` inside the
+container and sets `TASKBOARDS_EMBEDDING_MODEL_PATH` to
+`/models/<TASKBOARDS_MODEL_FILE>`. Point Compose at a different directory or
+file with `TASKBOARDS_MODEL_DIR` and `TASKBOARDS_MODEL_FILE` in `.env`. The
+directory is ignored by git and Docker build context so model weights stay
+local.
+
+The container starts even when the selected file is missing. Semantic search
+and indexing then fail with a "model file was not found" error until the file
+exists, and `GET /api/health` reports the resolved `embedding.modelPath` with
+`embedding.available` so the state is visible without reading logs.
 
 The embedding wrapper defaults to CPU-only execution and disables runtime
 downloads:
 
-- `TASKBOARDS_EMBEDDING_MODEL_PATH` can override the model path
+- `TASKBOARDS_EMBEDDING_MODEL_PATH` selects the model file inside the container
 - default context size is 512 tokens
 - indexed text is chunked conservatively to fit that limit
 - default inference threads is 2

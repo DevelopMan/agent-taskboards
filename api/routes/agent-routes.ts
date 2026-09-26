@@ -1,5 +1,6 @@
 import type { ErrorRequestHandler, Express, Request } from "express";
 import { asyncHandler } from "../http/async-handler.js";
+import { describeEmbeddingModel } from "./health-routes.js";
 import { ApiError } from "../http/errors.js";
 import {
   parseBody,
@@ -126,6 +127,7 @@ export function registerAgentRoutes(app: Express, options: AgentRouteOptions) {
 
   app.get("/api/agents/health", (req, res) => {
     const query = parseQuery(req, agentReadQuerySchema);
+    const embedding = describeEmbeddingModel();
 
     try {
       databaseClient.sqlite.prepare("SELECT 1").get();
@@ -139,7 +141,9 @@ export function registerAgentRoutes(app: Express, options: AgentRouteOptions) {
               lines: [
                 "- The API process is running.",
                 `- SQLite responded at \`${databaseClient.databasePath}\`.`,
-                "- Embedding search availability depends on the configured local model and indexed documents.",
+                embedding.available
+                  ? `- Embedding model is available at \`${embedding.modelPath}\`; search results depend on indexed documents.`
+                  : `- Embedding model file is missing at \`${embedding.modelPath}\`; semantic search is unavailable until it exists.`,
               ],
             },
           ],
@@ -150,6 +154,7 @@ export function registerAgentRoutes(app: Express, options: AgentRouteOptions) {
               path: databaseClient.databasePath,
               migrations: migrationResult,
             },
+            embedding,
             search: {
               sourceTypes: ["board", "task", "comment"],
             },
@@ -180,6 +185,7 @@ export function registerAgentRoutes(app: Express, options: AgentRouteOptions) {
               error:
                 error instanceof Error ? error.message : "Unknown database error",
             },
+            embedding,
           },
         },
         { status: 503, format: query.format },

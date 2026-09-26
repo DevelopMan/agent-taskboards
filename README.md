@@ -59,7 +59,10 @@ curl -L \
 GGUF is the model file format used by `llama.cpp` and `node-llama-cpp`. The
 `f32` file is the unquantized version expected by this repo's default settings;
 smaller quantized files exist, but use the exact filename above unless you also
-set `TASKBOARDS_EMBEDDING_MODEL_PATH` to point at a different model file.
+set `TASKBOARDS_MODEL_DIR` and `TASKBOARDS_MODEL_FILE` (see
+[Configuration](#configuration)) to point at a different model file. The app
+starts without the model, but semantic search stays unavailable until the file
+exists; `GET /api/health` reports the resolved path and whether it was found.
 
 ## Quick Start
 
@@ -87,6 +90,41 @@ TASKBOARDS_DEBUG= docker compose up --build
 
 In release mode, the container builds the API and UI into `dist/` and serves the
 compiled Express app and static UI from port `8142`.
+
+## Configuration
+
+Docker Compose reads host-side settings from the shell or from an ignored
+`.env` file in the repository root. Every setting has a safe default, so `.env`
+is optional:
+
+```sh
+cp .env.example .env
+```
+
+| Variable                  | Default                      | Purpose                                             |
+| ------------------------- | ---------------------------- | --------------------------------------------------- |
+| `TASKBOARDS_PORT`         | `8142`                       | Published host port for the UI and API              |
+| `TASKBOARDS_BIND_ADDRESS` | `127.0.0.1`                  | Interface the port binds to; `0.0.0.0` exposes LAN  |
+| `TASKBOARDS_DATA_DIR`     | `./data`                     | Host directory mounted at `/data` (SQLite database) |
+| `TASKBOARDS_UPLOADS_DIR`  | `./uploads`                  | Host directory mounted at `/uploads`                |
+| `TASKBOARDS_MODEL_DIR`    | `./models-gguf`              | Host directory mounted read-only at `/models`       |
+| `TASKBOARDS_MODEL_FILE`   | `bge-small-en-v1.5-f32.gguf` | Model file name inside `TASKBOARDS_MODEL_DIR`       |
+| `TASKBOARDS_DEBUG`        | `1`                          | `1` for watch mode, empty for release mode          |
+
+Relative paths resolve from the repository root. Paths with spaces work.
+Container-side paths and the internal port `8142` never change, so the API
+always sees `/data/taskboards.sqlite`, `/uploads`, and
+`/models/<TASKBOARDS_MODEL_FILE>`.
+
+**LAN exposure is unauthenticated.** The API and UI have no login, API keys, or
+rate limiting. With `TASKBOARDS_BIND_ADDRESS=0.0.0.0`, anyone who can reach
+your machine on the network can read and change every board. Keep the default
+loopback binding unless you trust the whole network, and prefer an SSH tunnel
+or a reverse proxy with authentication for remote access.
+
+`scripts/check-compose-config.sh` renders the default, custom-port,
+custom-storage, custom-model, and LAN configurations with
+`docker compose config` on the host and fails if any rendering is wrong.
 
 ## Install the Skill for Claude Code
 
@@ -175,8 +213,12 @@ Docker Compose bind-mounts local runtime directories from the repository root:
   `/data/taskboards.sqlite`.
 - `uploads/` -> `/uploads`: durable uploaded or imported files.
 - `tmp/` -> `/tmp/taskboards`: scratch space for temporary generated files.
+- `models-gguf/` -> `/models` (read-only): GGUF embedding models.
 
-These directories are ignored by git except for their `.keep` placeholders.
+These directories are ignored by git except for their `.keep` placeholders. The
+data, uploads, and model locations can be moved with the variables in
+[Configuration](#configuration); data and uploads persist across container
+recreation because they live on the host.
 
 ## Development Commands
 

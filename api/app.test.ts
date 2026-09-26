@@ -1,8 +1,15 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
@@ -91,6 +98,36 @@ describe("starter API", () => {
       process.env.TASKBOARDS_UPLOADS_PATH = previousUploadsPath;
     }
     previousUploadsPath = undefined;
+  });
+
+  it("reports the embedding model path and availability through health", async () => {
+    const previousModelPath = process.env.TASKBOARDS_EMBEDDING_MODEL_PATH;
+    const modelPath = join(tmpDir ?? tmpdir(), "models", "embedding.gguf");
+    process.env.TASKBOARDS_EMBEDDING_MODEL_PATH = modelPath;
+
+    try {
+      const missing = await api("GET", "/api/health");
+      expect(missing.status).toBe(200);
+      expect(booleanProp(missing.body, "ok")).toBe(true);
+      const missingEmbedding = objectProp(missing.body, "embedding");
+      expect(stringProp(missingEmbedding, "modelPath")).toBe(resolve(modelPath));
+      expect(booleanProp(missingEmbedding, "available")).toBe(false);
+
+      mkdirSync(dirname(modelPath), { recursive: true });
+      writeFileSync(modelPath, "gguf");
+
+      const present = await api("GET", "/api/health");
+      expect(present.status).toBe(200);
+      const presentEmbedding = objectProp(present.body, "embedding");
+      expect(stringProp(presentEmbedding, "modelPath")).toBe(resolve(modelPath));
+      expect(booleanProp(presentEmbedding, "available")).toBe(true);
+    } finally {
+      if (previousModelPath === undefined) {
+        delete process.env.TASKBOARDS_EMBEDDING_MODEL_PATH;
+      } else {
+        process.env.TASKBOARDS_EMBEDDING_MODEL_PATH = previousModelPath;
+      }
+    }
   });
 
   it("reports database storage through the maintenance endpoint", async () => {

@@ -28,13 +28,23 @@ visible to developers on the host machine:
   available to the API across container restarts.
 - `tmp/` -> `/tmp/taskboards`: scratch space for temporary files, staging, and
   generated intermediates. Do not rely on files here as durable data.
+- `models-gguf/` -> `/models` (read-only): GGUF embedding models. Compose sets
+  `TASKBOARDS_EMBEDDING_MODEL_PATH` to `/models/<TASKBOARDS_MODEL_FILE>`.
 
 The contents of these directories are ignored by git. Keep the `.keep` files so
 the directories exist in fresh checkouts.
 
+The data, uploads, and model locations, the published port, and the bind
+address are host-side settings read by Compose from the shell or an ignored
+`.env` file. `.env.example` documents them with safe defaults. Container-side
+paths (`/data`, `/uploads`, `/models`, port `8142`) stay fixed.
+
 ## Docker Workflow
 
-The app is exposed on `http://localhost:8142`.
+The app is exposed on `http://localhost:8142`. The published port binds to
+`127.0.0.1` unless `TASKBOARDS_BIND_ADDRESS=0.0.0.0` is set; LAN exposure is
+unauthenticated. `scripts/check-compose-config.sh` renders the release
+configuration matrix with `docker compose config` and runs on the host.
 
 By default, `docker-compose.yml` sets `TASKBOARDS_DEBUG=1`, which starts both
 the API and UI in watch/dev mode:

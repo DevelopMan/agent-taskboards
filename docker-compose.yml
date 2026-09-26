@@ -1,3 +1,7 @@
+# Host-side settings come from the shell or from an ignored `.env` file next to
+# this compose file. Copy `.env.example` to `.env` to customize them. Every
+# variable has a safe local default, so `docker compose up --build` works with
+# no `.env` at all.
 services:
   taskboards:
     build:
@@ -5,15 +9,47 @@ services:
     environment:
       TASKBOARDS_DEBUG: "${TASKBOARDS_DEBUG-1}"
       TASKBOARDS_DB_PATH: "/data/taskboards.sqlite"
+      TASKBOARDS_UPLOADS_PATH: "/uploads"
+      # The host model directory is mounted read-only at /models; the selected
+      # file name is appended so the app always reads the chosen model.
+      TASKBOARDS_EMBEDDING_MODEL_PATH: "/models/${TASKBOARDS_MODEL_FILE:-bge-small-en-v1.5-f32.gguf}"
+      # In-container base URL for tooling that runs inside the container. The
+      # internal port is fixed at 8142 regardless of the published host port.
       TASKBOARDS_HOST_URL: "http://localhost:8142"
     ports:
-      - "8142:8142"
+      # Default binding is loopback only. Set TASKBOARDS_BIND_ADDRESS=0.0.0.0
+      # to expose the unauthenticated API and UI to your LAN.
+      - host_ip: "${TASKBOARDS_BIND_ADDRESS:-127.0.0.1}"
+        published: "${TASKBOARDS_PORT:-8142}"
+        target: 8142
+        protocol: tcp
     volumes:
-      - .:/app
-      - ./data:/data
-      - ./uploads:/uploads
-      - ./tmp:/tmp/taskboards
-      - taskboards_node_modules:/app/node_modules
+      # Source mount for debug/watch mode; release mode also builds dist/ here.
+      - type: bind
+        source: .
+        target: /app
+      - type: volume
+        source: taskboards_node_modules
+        target: /app/node_modules
+      # Durable application data (SQLite database).
+      - type: bind
+        source: "${TASKBOARDS_DATA_DIR:-./data}"
+        target: /data
+      # Durable uploaded or imported files.
+      - type: bind
+        source: "${TASKBOARDS_UPLOADS_DIR:-./uploads}"
+        target: /uploads
+      # Scratch space; contents are not durable.
+      - type: bind
+        source: ./tmp
+        target: /tmp/taskboards
+      # GGUF embedding model directory, mounted read-only. The app starts even
+      # when the selected file is missing; semantic search then reports the
+      # missing model instead of failing at container start.
+      - type: bind
+        source: "${TASKBOARDS_MODEL_DIR:-./models-gguf}"
+        target: /models
+        read_only: true
 
 volumes:
   taskboards_node_modules:

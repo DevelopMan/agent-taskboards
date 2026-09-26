@@ -1,6 +1,20 @@
+# Build tooling and generated output
 .git/
+backup-data/
 coverage/
 dist/
-models-gguf/
 node_modules/
 npm-debug.log*
+
+# Local runtime state is bind-mounted at run time, never baked into the image.
+data/
+uploads/
+tmp/
+models-gguf/
+**/*.sqlite
+**/*.sqlite-shm
+**/*.sqlite-wal
+**/.DS_Store
+.env
+.env.*
+!.env.example

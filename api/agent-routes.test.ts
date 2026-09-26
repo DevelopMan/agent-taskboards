@@ -1,8 +1,13 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import { createDatabaseClient, type DatabaseClient } from "./db/client.js";
@@ -98,6 +103,36 @@ describe("agent markdown API", () => {
     expect(missing.status).toBe(404);
     expect(missing.contentType).toContain("text/markdown");
     expect(missing.text).toContain("`not_found`: Task not found.");
+  });
+
+  it("reports embedding model availability through agent health", async () => {
+    const previousModelPath = process.env.TASKBOARDS_EMBEDDING_MODEL_PATH;
+    const modelPath = join(tmpDir ?? tmpdir(), "models", "embedding.gguf");
+    process.env.TASKBOARDS_EMBEDDING_MODEL_PATH = modelPath;
+
+    try {
+      const missing = await api("GET", "/api/agents/health?format=json");
+      expect(missing.status).toBe(200);
+      expect(missing.text).toContain("Embedding model file is missing at");
+      const missingEmbedding = objectProp(jsonBlock(missing.text), "embedding");
+      expect(stringProp(missingEmbedding, "modelPath")).toBe(resolve(modelPath));
+      expect(booleanProp(missingEmbedding, "available")).toBe(false);
+
+      mkdirSync(dirname(modelPath), { recursive: true });
+      writeFileSync(modelPath, "gguf");
+
+      const present = await api("GET", "/api/agents/health?format=json");
+      expect(present.status).toBe(200);
+      expect(present.text).toContain("Embedding model is available at");
+      const presentEmbedding = objectProp(jsonBlock(present.text), "embedding");
+      expect(booleanProp(presentEmbedding, "available")).toBe(true);
+    } finally {
+      if (previousModelPath === undefined) {
+        delete process.env.TASKBOARDS_EMBEDDING_MODEL_PATH;
+      } else {
+        process.env.TASKBOARDS_EMBEDDING_MODEL_PATH = previousModelPath;
+      }
+    }
   });
 
   it("discovers projects and boards and reports bounded board tasks", async () => {

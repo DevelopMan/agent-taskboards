@@ -28,8 +28,16 @@ Runtime directories follow the Docker Compose mounts:
 - `/data`: durable application data, including the SQLite database
 - `/uploads`: durable uploaded or imported files for future attachment flows
 - `/tmp/taskboards`: scratch data that can be discarded
+- `/models`: read-only GGUF embedding models
 
 Durable user or agent data should not be stored in `/tmp/taskboards`.
+
+The host directories behind `/data`, `/uploads`, and `/models` default to
+`data/`, `uploads/`, and `models-gguf/` in the repository and can be moved with
+`TASKBOARDS_DATA_DIR`, `TASKBOARDS_UPLOADS_DIR`, and `TASKBOARDS_MODEL_DIR` in
+the Compose `.env` file. Container-side paths do not change, so the API reads
+the same `TASKBOARDS_DB_PATH`, `TASKBOARDS_UPLOADS_PATH`, and
+`TASKBOARDS_EMBEDDING_MODEL_PATH` values regardless of host layout.
 
 ## IDs
 
