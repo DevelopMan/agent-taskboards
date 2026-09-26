@@ -91,6 +91,16 @@ TASKBOARDS_DEBUG= docker compose up --build
 In release mode, the container builds the API and UI into `dist/` and serves the
 compiled Express app and static UI from port `8142`.
 
+Helper scripts wrap these commands and run from any directory. Extra arguments
+pass through to `docker compose up` (for example `-d`):
+
+- `scripts/run.sh`: start in debug mode with the existing image.
+- `scripts/run-build.sh`: rebuild the image, then start in debug mode.
+- `scripts/run-release.sh`: start in release mode (add `--build` to rebuild).
+
+The scripts set `TASKBOARDS_DEBUG` themselves, so they override the value in
+`.env`.
+
 ## Configuration
 
 Docker Compose reads host-side settings from the shell or from an ignored
