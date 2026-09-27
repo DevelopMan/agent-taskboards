@@ -46,9 +46,9 @@ docker compose exec taskboards npm run build
 ```
 
 Before opening a pull request, run the full CI suite exactly as GitHub Actions
-runs it. The script builds the Docker image, then runs typecheck, lint, the
-test suite, and the production build in throwaway containers, plus the Compose
-configuration check on the host. It needs no running app and no embedding
+runs it. The script builds the Docker image, then runs the lockfile check,
+typecheck, lint, the test suite, and the production build in throwaway
+containers, plus the Compose configuration check on the host. It needs no running app and no embedding
 model:
 
 ```sh
@@ -57,14 +57,18 @@ scripts/ci.sh
 
 `scripts/ci.sh test lint` runs a subset, and `--no-build` reuses the last
 built image. CI runs the same checks on `linux/amd64` and `linux/arm64`;
-macOS Apple Silicon and Linux x86-64 are the supported platforms.
+macOS Apple Silicon and Linux x86-64 are the supported platforms. To reproduce
+the amd64 lane on Apple Silicon, run
+`TASKBOARDS_CI_PLATFORM=linux/amd64 scripts/ci.sh` (slower, under emulation).
 
 ## Pull Request Expectations
 
 - Run `scripts/ci.sh` locally and make sure it passes before opening the PR.
 - Keep changes scoped to one concern per pull request.
 - Commit `package-lock.json` changes together with `package.json` changes;
-  the image build fails when they drift apart.
+  the image build fails when they drift apart. npm can silently drop other
+  platforms' native packages from the lockfile; `scripts/ci.sh lockfile`
+  catches that, and `scripts/lockfile.mjs` documents the repair command.
 - Update the documentation that your change affects: `README.md`, the
   relevant `docs/*.md` files, and `CHANGELOG.md`.
 - Reference the issue the PR addresses, when one exists.

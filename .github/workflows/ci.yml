@@ -57,6 +57,10 @@ jobs:
 
       # Each check runs whenever the image built, so one failure does not hide
       # the others.
+      - name: Lockfile
+        if: ${{ !cancelled() && steps.image.outcome == 'success' }}
+        run: scripts/ci.sh --no-build lockfile
+
       - name: Typecheck
         if: ${{ !cancelled() && steps.image.outcome == 'success' }}
         run: scripts/ci.sh --no-build typecheck

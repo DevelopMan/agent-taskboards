@@ -87,14 +87,22 @@ Scripts are defined in `package.json` and are intended to run inside Docker:
 ## Continuous Integration
 
 `.github/workflows/ci.yml` runs on pull requests and pushes to `main` for
-`linux/amd64` and `linux/arm64`. It builds the Docker image, then runs
-typecheck, lint, the full Vitest suite, and the production build inside that
-image, plus `scripts/check-compose-config.sh` on the host. The runner never
+`linux/amd64` and `linux/arm64`. It builds the Docker image, then runs the
+lockfile check, typecheck, lint, the full Vitest suite, and the production
+build inside that image, plus `scripts/check-compose-config.sh` on the host. The runner never
 installs npm dependencies, and CI never needs the embedding model.
 
 `scripts/ci.sh [check...]` runs the same checks locally through Docker; the
-workflow calls it too, so keep both in sync. The Dockerfile uses `npm ci`, so
-commit `package-lock.json` changes together with `package.json` changes.
+workflow calls it too, so keep both in sync. Set
+`TASKBOARDS_CI_PLATFORM=linux/amd64` to reproduce the amd64 lane on Apple
+Silicon. The Dockerfile uses `npm ci`, so commit `package-lock.json` changes
+together with `package.json` changes.
+
+npm drops other platforms' optional native packages (rollup, esbuild,
+sqlite-vec, node-llama-cpp) when it rewrites `package-lock.json` from an
+existing `node_modules`, which breaks `npm ci` on the other architecture. After
+any dependency change, run `scripts/ci.sh lockfile`; if it fails, repair the
+lockfile with the command at the top of `scripts/lockfile.mjs`.
 
 ## TypeScript Notes
 

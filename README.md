@@ -421,8 +421,9 @@ docker compose exec taskboards npm run build
 ```
 
 Run the continuous integration checks exactly as GitHub Actions runs them. The
-script builds the Docker image, then runs typecheck, lint, tests, and the
-production build in throwaway containers, plus the Compose configuration check.
+script builds the Docker image, then runs the lockfile check, typecheck, lint,
+tests, and the production build in throwaway containers, plus the Compose
+configuration check.
 It needs no running app and no embedding model:
 
 ```sh

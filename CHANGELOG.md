@@ -6,6 +6,15 @@ Important changes to Agent Taskboards are documented in this file.
 
 ### 2026-09-27
 
+- **Cross-platform lockfile repair** (`add-continuous-integration-for-tbsg8t`):
+  `package-lock.json` had been written on linux/arm64 and was missing the other
+  platforms' optional native packages, so `npm ci` on linux/amd64 lacked
+  rollup, esbuild, sqlite-vec, and node-llama-cpp binaries and the test and
+  build steps failed. The lockfile now lists every platform's packages and
+  integrity hashes for all entries, with no resolved version changed.
+  `scripts/lockfile.mjs` checks and repairs this, CI runs the check as a new
+  `lockfile` step, and `TASKBOARDS_CI_PLATFORM=linux/amd64 scripts/ci.sh`
+  reproduces the amd64 lane on Apple Silicon.
 - **README rewrite for the v0.1.0 public preview**
   (`rewrite-the-readme-for-bv12lx`): The README now leads with the launch
   positioning (local Kanban and durable memory for coding agents), the
