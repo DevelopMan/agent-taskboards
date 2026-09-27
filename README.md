@@ -8,6 +8,7 @@ creating, moving, and annotating work, append-only handoff history that
 survives chat sessions, and semantic search over everything the board
 remembers. You get the same board as a React UI.
 
+[![CI](https://github.com/WarehouseRobotics/agent-taskboards/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/WarehouseRobotics/agent-taskboards/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENCE.md)
 [![Status: public preview](https://img.shields.io/badge/status-v0.1.0%20public%20preview-orange.svg)](CHANGELOG.md)
 
