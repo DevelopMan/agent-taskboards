@@ -4,6 +4,7 @@
 # no `.env` at all.
 services:
   taskboards:
+    restart: unless-stopped
     build:
       context: .
     environment:
