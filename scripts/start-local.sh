@@ -79,7 +79,27 @@ read_manifest_entry() {
   mf_bytes="$(printf '%s' "$rme_line" | cut -d'|' -f3)"
   mf_sha="$(printf '%s' "$rme_line" | cut -d'|' -f4)"
   mf_url="$(printf '%s' "$rme_line" | cut -d'|' -f5)"
+  # The file name becomes part of host and container paths, so a manifest
+  # must not be able to redirect the verified download outside the model dir.
+  case "$mf_file" in
+    ''|*/*|.*)
+      fail "manifest entry '$1' has an unsafe file name: $mf_file" \
+        "fix or unset TASKBOARDS_MODEL_MANIFEST, then re-run scripts/start-local.sh"
+      ;;
+  esac
+  case "$mf_bytes" in
+    ''|*[!0-9]*)
+      fail "manifest entry '$1' has a non-numeric size: $mf_bytes" \
+        "fix or unset TASKBOARDS_MODEL_MANIFEST, then re-run scripts/start-local.sh"
+      ;;
+  esac
   mf_mb=$(((mf_bytes + 1048575) / 1048576))
+}
+
+check_sha_tool() {
+  command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 \
+    || fail "neither sha256sum nor shasum is available to verify the model" \
+      "install coreutils (sha256sum) or perl (shasum), then re-run scripts/start-local.sh"
 }
 
 sha256_of() {
@@ -98,6 +118,16 @@ validate_gguf() {
 env_value() {
   [ -f .env ] || return 0
   sed -n "s/^$1=//p" .env | tail -n 1
+}
+
+# Values land unquoted in `.env`, where Docker Compose interpolates `$`,
+# treats ` #` as a comment, and where quotes and backslashes change parsing.
+# Rejecting those characters keeps the written value identical to the mounted
+# one.
+valid_path_input() {
+  case "$1" in
+    ''|*'$'*|*'#'*|*\\*|*'"'*|*"'"*) return 1 ;;
+  esac
 }
 
 valid_port() {
@@ -189,13 +219,25 @@ prompt_custom_model() {
     [ "$pc_attempts" -le 5 ] || too_many_attempts
     printf 'Path to an existing GGUF model file: '
     IFS= read -r pc_path || pc_path=""
-    if validate_gguf "$pc_path"; then
-      model_download=0
-      cfg_model_dir="$(cd "$(dirname -- "$pc_path")" && pwd -P)"
-      cfg_model_file="$(basename -- "$pc_path")"
-      return 0
+    # Resolve symlinks so the recorded directory actually contains the model
+    # bytes; a symlink target outside the mounted directory would be broken
+    # inside the container.
+    pc_resolved="$(readlink -f "$pc_path" 2>/dev/null || true)"
+    [ -n "$pc_resolved" ] || pc_resolved="$pc_path"
+    if ! validate_gguf "$pc_resolved"; then
+      printf 'Not a readable GGUF file (expected the GGUF magic bytes): %s\n' "$pc_path"
+      continue
     fi
-    printf 'Not a readable GGUF file (expected the GGUF magic bytes): %s\n' "$pc_path"
+    pc_dir="$(cd "$(dirname -- "$pc_resolved")" && pwd -P)"
+    pc_file="$(basename -- "$pc_resolved")"
+    if ! valid_path_input "$pc_dir" || ! valid_path_input "$pc_file"; then
+      printf "The model path must not contain \$, #, quotes, or backslashes.\n"
+      continue
+    fi
+    model_download=0
+    cfg_model_dir="$pc_dir"
+    cfg_model_file="$pc_file"
+    return 0
   done
 }
 
@@ -246,10 +288,25 @@ prompt_bind() {
   done
 }
 
+# ask_path QUESTION DEFAULT: like ask, but re-prompts until the answer is a
+# safe `.env` path value.
+ask_path() {
+  ap_attempts=0
+  while :; do
+    ap_attempts=$((ap_attempts + 1))
+    [ "$ap_attempts" -le 5 ] || too_many_attempts
+    ask "$1" "$2"
+    if valid_path_input "$ans"; then
+      return 0
+    fi
+    printf "Paths must not contain \$, #, quotes, or backslashes.\n"
+  done
+}
+
 prompt_dirs() {
-  ask 'Data directory (SQLite database)' "${cfg_data_dir:-./data}"
+  ask_path 'Data directory (SQLite database)' "${cfg_data_dir:-./data}"
   cfg_data_dir="$ans"
-  ask 'Uploads directory' "${cfg_uploads_dir:-./uploads}"
+  ask_path 'Uploads directory' "${cfg_uploads_dir:-./uploads}"
   cfg_uploads_dir="$ans"
 }
 
@@ -258,6 +315,7 @@ prompt_dirs() {
 # file, if any, is only replaced by that final atomic rename.
 ensure_curated_model() {
   [ "$model_download" -eq 1 ] || return 0
+  check_sha_tool
   em_target="$cfg_model_dir/$cfg_model_file"
   mkdir -p "$cfg_model_dir" \
     || fail "cannot create model directory $cfg_model_dir" \
@@ -308,7 +366,12 @@ set_env_var() {
   if [ ! -f .env ]; then
     printf '# Managed by scripts/start-local.sh; see .env.example for documentation.\n' > .env
   fi
-  awk -v key="$1" -v val="$2" '
+  # Copy first so the temporary file inherits the mode of the existing .env,
+  # which may hold user secrets tightened to 0600. The value goes through
+  # ENVIRON because `awk -v` interprets backslash escapes.
+  cp .env ".env.tmp.$$"
+  SEV_KEY="$1" SEV_VAL="$2" awk '
+    BEGIN { key = ENVIRON["SEV_KEY"]; val = ENVIRON["SEV_VAL"] }
     index($0, key "=") == 1 { if (!done) { print key "=" val; done = 1 }; next }
     { print }
     END { if (!done) print key "=" val }
@@ -373,5 +436,15 @@ if [ "$cfg_bind" = "0.0.0.0" ]; then
 else
   printf 'Starting Agent Taskboards in release mode on http://localhost:%s\n' "$cfg_port"
 fi
+# Shell environment overrides `.env` in Compose, so export the resolved
+# settings explicitly; otherwise inherited TASKBOARDS_* variables could launch
+# a configuration that differs from the one displayed and validated above
+# (including an unacknowledged LAN binding).
+export TASKBOARDS_PORT="$cfg_port"
+export TASKBOARDS_BIND_ADDRESS="$cfg_bind"
+export TASKBOARDS_DATA_DIR="$cfg_data_dir"
+export TASKBOARDS_UPLOADS_DIR="$cfg_uploads_dir"
+export TASKBOARDS_MODEL_DIR="$cfg_model_dir"
+export TASKBOARDS_MODEL_FILE="$cfg_model_file"
 export TASKBOARDS_DEBUG=
 exec docker compose up --build "$@"

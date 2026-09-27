@@ -8,6 +8,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 interface DockerCall {
   args: string[];
   debug: string | null;
+  bind: string | null;
 }
 
 // The suite runs the real script against a throwaway copy of the repo layout
@@ -79,7 +82,8 @@ describe("start-local.sh", () => {
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 const debug = "TASKBOARDS_DEBUG" in process.env ? process.env.TASKBOARDS_DEBUG : null;
-fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify({ args, debug }) + "\\n");
+const bind = "TASKBOARDS_BIND_ADDRESS" in process.env ? process.env.TASKBOARDS_BIND_ADDRESS : null;
+fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify({ args, debug, bind }) + "\\n");
 const mode = process.env.FAKE_DOCKER_MODE || "ok";
 if (args[0] === "compose" && args[1] === "version" && mode === "nocompose") process.exit(1);
 if (args[0] === "info" && mode === "nodaemon") process.exit(1);
@@ -414,6 +418,67 @@ if (mode === "hang") {
     expect(second.stdout).toContain("Reusing the existing configuration");
     expect(envFile()).toBe(envAfterFirst);
     expect(curlCallCount()).toBe(0);
+  });
+
+  it("exports the resolved settings so inherited shell variables cannot override them", () => {
+    const result = runSetup([], happyInput, { TASKBOARDS_BIND_ADDRESS: "0.0.0.0" });
+
+    expect(result.status).toBe(0);
+    expect(envFile()).toContain("TASKBOARDS_BIND_ADDRESS=127.0.0.1");
+    const up = dockerCalls().at(-1);
+    expect(up?.args).toEqual(["compose", "up", "--build"]);
+    expect(up?.bind).toBe("127.0.0.1");
+  });
+
+  it("rejects a manifest whose file name escapes the model directory", () => {
+    writeFileSync(
+      manifestPath,
+      `q8|../evil.gguf|${fixture.length}|${fixtureSha}|http://example.invalid/evil.gguf\n`,
+    );
+
+    const result = runSetup([], happyInput);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("unsafe file name");
+    expect(result.stderr).toContain("Recovery:");
+    expect(existsSync(join(repoDir, "evil.gguf"))).toBe(false);
+    expect(existsSync(join(repoDir, ".env"))).toBe(false);
+  });
+
+  it("preserves restrictive .env permissions across a reconfigure", () => {
+    seedValidState();
+    chmodSync(join(repoDir, ".env"), 0o600);
+
+    const result = runSetup(["--reconfigure"], `5\n${join(repoDir, "models-gguf", modelFile)}\n9000\n\n\n\n`);
+
+    expect(result.status).toBe(0);
+    expect(statSync(join(repoDir, ".env")).mode & 0o777).toBe(0o600);
+  });
+
+  it("re-prompts directory answers containing .env-unsafe characters", () => {
+    const result = runSetup([], "1\n\n\n./data$dir\n./data\n\n");
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("must not contain");
+    expect(envFile()).toContain("TASKBOARDS_DATA_DIR=./data");
+    expect(envFile()).not.toContain("data$dir");
+  });
+
+  it("resolves a symlinked custom model to its real directory", () => {
+    const realDir = join(tmpDir, "real-models");
+    mkdirSync(realDir, { recursive: true });
+    const realPath = join(realDir, "real-model.gguf");
+    writeFileSync(realPath, Buffer.from("GGUF real model"));
+    const linkDir = join(tmpDir, "links");
+    mkdirSync(linkDir, { recursive: true });
+    symlinkSync(realPath, join(linkDir, "linked.gguf"));
+
+    const result = runSetup([], `5\n${join(linkDir, "linked.gguf")}\n\n\n\n\n`);
+
+    expect(result.status).toBe(0);
+    const env = envFile();
+    expect(env).toContain(`TASKBOARDS_MODEL_DIR=${realDir}`);
+    expect(env).toContain("TASKBOARDS_MODEL_FILE=real-model.gguf");
   });
 
   it("fails before touching anything when docker is missing", () => {
