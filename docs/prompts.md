@@ -149,7 +149,8 @@ creating a duplicate.
 ## Prompt Picker
 
 The prompt picker opens from a toggle in the task detail header and extends
-as a nested sidebar on the task detail's left. It shows:
+as a nested sidebar on the task detail's left. It is visible by default, and
+closing or reopening it saves that preference in the browser. It shows:
 
 - a filter input over prompt names and bodies
 - a `Recent` group with the most recently used prompts for one-click copying

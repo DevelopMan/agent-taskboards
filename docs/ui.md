@@ -146,6 +146,8 @@ The prompt picker brings the library to the task detail:
 
 - it opens from a toggle in the task detail header and extends as a nested
   sidebar on the task detail's left, attached rather than floating
+- it is visible by default; closing or reopening it saves the visibility
+  preference in the browser for future task details
 - the initial state leads with recently used prompts for one-click copying
 - one click copies the prompt body with `{{TASK}}`, `{{PARENT_TASK}}`,
   `{{BOARD}}` and `{{PROJECT}}` tokens rendered from the open task and its

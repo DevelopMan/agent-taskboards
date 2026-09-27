@@ -6,6 +6,7 @@ import { Button, EmptyState, Icon, InlineError, LabelChip, Mono, PriorityFlag, S
 import { Topbar } from "../../components/layout";
 import { PromptPicker } from "../prompts";
 import { TaskDetail } from "../tasks";
+import { persistPromptPickerVisible, storedPromptPickerVisible } from "../tasks/task-prompt-picker-visibility";
 import { buildBoardReferenceText } from "./board-reference";
 import {
   nextRangeSelectionAnchor,
@@ -124,7 +125,7 @@ export function BoardWorkspace({
   const [archivingSelection, setArchivingSelection] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set());
   const [rangeSelectionAnchors, setRangeSelectionAnchors] = useState<Map<string, string>>(() => new Map());
-  const [promptPickerOpen, setPromptPickerOpen] = useState(false);
+  const [promptPickerOpen, setPromptPickerOpen] = useState(storedPromptPickerVisible);
   const promptPickerPanelRef = useRef<HTMLElement | null>(null);
   const activeBoardId = activeBoard?.id ?? null;
   const boardScrollerElement = useRef<HTMLDivElement | null>(null);
@@ -158,6 +159,10 @@ export function BoardWorkspace({
   const setSortPreference = (nextSortKey: BoardSortKey) => {
     setSortKey(nextSortKey);
     persistBoardSortKey(nextSortKey);
+  };
+  const setPromptPickerPreference = (visible: boolean) => {
+    setPromptPickerOpen(visible);
+    persistPromptPickerVisible(visible);
   };
   const clearTaskSelection = useCallback(() => {
     setSelectedTaskIds(new Set());
@@ -566,7 +571,7 @@ export function BoardWorkspace({
             <PromptPicker
               board={activeBoard}
               boardTasks={tasks}
-              onClose={() => setPromptPickerOpen(false)}
+              onClose={() => setPromptPickerPreference(false)}
               panelRef={promptPickerPanelRef}
               project={activeProject}
               task={activePickerTask}
@@ -591,7 +596,7 @@ export function BoardWorkspace({
               onNavigateToTask={onNavigateToTask}
               onPostComment={postCommentPreservingScroll}
               onTaskDraftChange={onTaskDraftChange}
-              onTogglePromptPicker={() => setPromptPickerOpen((current) => !current)}
+              onTogglePromptPicker={() => setPromptPickerPreference(!promptPickerOpen)}
               onUpdateTask={updateTaskPreservingScroll}
               onUploadTaskAttachment={uploadTaskAttachmentPreservingScroll}
               promptPickerOpen={promptPickerOpen}
