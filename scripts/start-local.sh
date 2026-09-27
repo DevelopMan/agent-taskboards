@@ -51,10 +51,10 @@ check_prereqs() {
 # to the exact files published by CompendiumLabs on Hugging Face.
 default_manifest() {
   cat <<'EOF'
+f32|bge-small-en-v1.5-f32.gguf|133609568|bf40c42ad7d89382e9ba7376d5c4b73f6b556cb541fab37aaa1da9c320149b65|https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-f32.gguf
 q8|bge-small-en-v1.5-q8_0.gguf|36806944|ec38e8da142596baa913124ae50550de284b6916bf59577ef2f0cb9660c2f514|https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-q8_0.gguf
 q4|bge-small-en-v1.5-q4_k_m.gguf|24808576|363a0a4855dff6c653e06efe3209157debcf7f74e52d0d7c71e2747cd523043e|https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-q4_k_m.gguf
 f16|bge-small-en-v1.5-f16.gguf|67308128|f0b2fef971e8366438bfd2d9aefea1b0115919389448806d290237f638bae999|https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-f16.gguf
-f32|bge-small-en-v1.5-f32.gguf|133609568|bf40c42ad7d89382e9ba7376d5c4b73f6b556cb541fab37aaa1da9c320149b65|https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-f32.gguf
 EOF
 }
 
@@ -178,30 +178,30 @@ too_many_attempts() {
 }
 
 prompt_model() {
+  read_manifest_entry f32
+  pm_f32_mb="$mf_mb"
   read_manifest_entry q8
-  pm_q8_file="$mf_file" pm_q8_mb="$mf_mb"
+  pm_q8_mb="$mf_mb"
   read_manifest_entry q4
   pm_q4_mb="$mf_mb"
   read_manifest_entry f16
   pm_f16_mb="$mf_mb"
-  read_manifest_entry f32
-  pm_f32_mb="$mf_mb"
   pm_attempts=0
   while :; do
     pm_attempts=$((pm_attempts + 1))
     [ "$pm_attempts" -le 5 ] || too_many_attempts
     printf 'Embedding model for local semantic search:\n'
-    printf '  1) Q8 (recommended) - %s MB download, near full quality\n' "$pm_q8_mb"
-    printf '  2) Q4 - %s MB, smallest download, slightly lower quality\n' "$pm_q4_mb"
-    printf '  3) F16 - %s MB, half precision, marginal gain over Q8\n' "$pm_f16_mb"
-    printf '  4) F32 - %s MB, full precision reference, no practical benefit\n' "$pm_f32_mb"
+    printf '  1) F32 (default) - %s MB download, full precision; matches the Compose default\n' "$pm_f32_mb"
+    printf '  2) Q8 - %s MB, near full quality, smaller download\n' "$pm_q8_mb"
+    printf '  3) Q4 - %s MB, smallest download, slightly lower quality\n' "$pm_q4_mb"
+    printf '  4) F16 - %s MB, half precision, between Q8 and F32\n' "$pm_f16_mb"
     printf '  5) Use an existing GGUF file on this machine\n'
     ask 'Choose a model' 1
     case "$ans" in
-      1) read_manifest_entry q8 ;;
-      2) read_manifest_entry q4 ;;
-      3) read_manifest_entry f16 ;;
-      4) read_manifest_entry f32 ;;
+      1) read_manifest_entry f32 ;;
+      2) read_manifest_entry q8 ;;
+      3) read_manifest_entry q4 ;;
+      4) read_manifest_entry f16 ;;
       5) prompt_custom_model; return 0 ;;
       *) printf 'Enter a number from 1 to 5.\n'; continue ;;
     esac

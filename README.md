@@ -1,122 +1,247 @@
 # Agent Taskboards
 
-Agent Taskboards is a local-first Kanban task board for developers who coordinate
-coding work with AI agents. It gives humans a React board UI and gives agents a
-stable API for creating, moving, searching, and annotating tasks without brittle
-UI automation.
+**Local Kanban and durable memory for coding agents.**
 
-![Agent Taskboards demo board](screenshot.jpg)
+Agent Taskboards runs on your machine and gives AI coding agents such as Claude
+Code and Codex a task board they can actually use: a deterministic API for
+creating, moving, and annotating work, append-only handoff history that
+survives chat sessions, and semantic search over everything the board
+remembers. You get the same board as a React UI.
 
-The app is intentionally single-user and local. It runs in Docker, stores task
-data in SQLite, and supports local semantic search over boards, tasks, and
-comments with a GGUF embedding model.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENCE.md)
+[![Status: public preview](https://img.shields.io/badge/status-v0.1.0%20public%20preview-orange.svg)](CHANGELOG.md)
 
-## Use Cases
-
-- Track implementation work across multiple repositories, projects, or local
-  workstreams.
-- Give coding agents durable task memory that survives chat sessions and
-  container restarts.
-- Keep project context searchable through task descriptions, comments, and board
-  state.
-- Coordinate handoffs by leaving append-only comments and preserving task
-  activity history.
-- Avoid driving a web UI from agents when a deterministic JSON API is available.
-
-## Features
-
-- Projects, boards, workflow columns, tasks, comments with activity history and uploads.
-- Default Kanban workflow columns: `backlog`, `ready`, `in_progress`, `blocked`,
-  `review`, and `done`.
-- React UI for human task management.
-- Prompt library with categories, default prompts, and a task-detail prompt
-  picker that fills `{{TASK}}`, `{{PARENT_TASK}}`, `{{BOARD}}` and
-  `{{PROJECT}}` tokens on copy.
-- Express API for scripts and AI agents.
-- SQLite persistence in `data/taskboards.sqlite`.
-- Local semantic search over boards, tasks, and comments using `node-llama-cpp`
-  and `sqlite-vec`.
-- Agent helper skill and wrapper script under `skills/tasks-management/`.
-
-## Before First Run: Download the Embeddings Model
-
-The local embedding model is expected at:
-
-```text
-models-gguf/bge-small-en-v1.5-f32.gguf
-```
-
-The model directory is ignored by git so model weights stay local. To download
-the expected GGUF file from Hugging Face:
-
-```sh
-mkdir -p models-gguf
-curl -L \
-  -o models-gguf/bge-small-en-v1.5-f32.gguf \
-  https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-f32.gguf
-```
-
-GGUF is the model file format used by `llama.cpp` and `node-llama-cpp`. The
-`f32` file is the unquantized version expected by this repo's default settings;
-smaller quantized files exist, but use the exact filename above unless you also
-set `TASKBOARDS_MODEL_DIR` and `TASKBOARDS_MODEL_FILE` (see
-[Configuration](#configuration)) to point at a different model file. The app
-starts without the model, but semantic search stays unavailable until the file
-exists; `GET /api/health` reports the resolved path and whether it was found.
+<!--
+Above-the-fold media: the workflow animation produced by the launch-assets task
+(produce-launch-demo-and-lzwpeo) lands at docs/media/readme-demo.gif and
+replaces the screenshot below. Keep the alt text.
+-->
+![Agent Taskboards board with an agent-driven task](screenshot.jpg)
 
 ## Quick Start
 
-For a guided first run, `scripts/start-local.sh` checks Docker, walks through
-the embedding model download, port, storage, and network binding, and then
-starts release mode:
+You need Docker with Docker Compose v2 and about 2 GB of free disk for the
+image and the embedding model.
 
 ```sh
+git clone https://github.com/WarehouseRobotics/agent-taskboards.git
+cd agent-taskboards
 scripts/start-local.sh
 ```
 
-It reuses a valid existing configuration on later runs; pass `--reconfigure`
-to change it.
-
-Alternatively, start the app in Docker directly:
-
-```sh
-docker compose up --build
-```
-
-Then open:
+The launcher checks Docker, walks you through the embedding model download,
+port, storage directories, and network binding, then builds and starts the app
+in release mode. Every prompt has a safe default, so pressing Enter at each one
+gives you a localhost-only install on port `8142` with the full-precision F32
+model. When the log settles, open:
 
 ```text
 http://localhost:8142
 ```
 
-By default, Docker Compose sets `TASKBOARDS_DEBUG=1`. In debug mode, the Vite UI
-runs on port `8142`, the Express API runs on port `3000`, and Vite proxies
-`/api` requests to the API server.
-
-Run release mode by unsetting `TASKBOARDS_DEBUG`:
+Press `Ctrl+C` to stop. Later runs reuse your configuration and skip straight to
+launch; pass `-d` to run in the background or `--reconfigure` to change the
+answers:
 
 ```sh
-TASKBOARDS_DEBUG= docker compose up --build
+scripts/start-local.sh -d
+scripts/start-local.sh --reconfigure
 ```
 
-In release mode, the container builds the API and UI into `dist/` and serves the
-compiled Express app and static UI from port `8142`.
+Prefer to run Docker Compose yourself, or work on the code? See
+[Manual Setup](#manual-setup).
 
-Helper scripts wrap these commands and run from any directory. Extra arguments
-pass through to `docker compose up` (for example `-d`):
+## Why Agent Taskboards
 
-- `scripts/run.sh`: start in debug mode with the existing image.
-- `scripts/run-build.sh`: rebuild the image, then start in debug mode.
-- `scripts/run-release.sh`: start in release mode (add `--build` to rebuild).
+- **A deterministic API built for agents.** Agents create, move, search, and
+  comment on tasks through JSON or markdown-first endpoints and a bundled shell
+  wrapper. Stable IDs, explicit column transitions, and structured errors
+  replace brittle UI automation.
+- **Durable handoff history.** Comments are append-only and every state change
+  is recorded as activity. An agent picking up a task sees what the previous
+  session decided, what blocked it, and what still needs doing, long after the
+  chat that produced it is gone.
+- **Fully local semantic search.** Boards, tasks, and comments are embedded
+  with a local GGUF model through `node-llama-cpp` and indexed in SQLite with
+  `sqlite-vec`. Agents retrieve relevant prior work without sending your task
+  data to a hosted service.
 
-The scripts set `TASKBOARDS_DEBUG` themselves, so they override the value in
-`.env`.
+Everything stays on your machine: SQLite database, uploads, model weights. No
+accounts, no telemetry, no hosted component. MIT licensed.
+
+## Prompt Library
+
+The prompt library turns a task into a ready-to-paste agent prompt. Open a
+task, pick a prompt from the picker in the task detail, and the copied text has
+the `{{TASK}}`, `{{PARENT_TASK}}`, `{{BOARD}}`, and `{{PROJECT}}` tokens
+rendered as `"title" ( id=... )` references. Paste it into your agent session
+and the agent has the exact task, its umbrella task, and the board and project
+names to orient itself with.
+
+The library ships with a starter set of planning, implementation, review, and
+follow-up prompts organized in categories. You can edit them, add your own,
+and restore the defaults at any time. Prompt and category names accept
+emoji.
+
+Current boundaries, so you know what you are getting:
+
+- One global library shared by all projects; no per-project prompts.
+- Clipboard-mediated: a human copies the rendered prompt into the agent. Agents
+  do not browse or fetch prompts on their own.
+- Prompts are not indexed for semantic search.
+- Management is through the UI and the regular REST API. There is no
+  `/api/agents/prompts` endpoint in v0.1.0.
+
+See [docs/prompts.md](docs/prompts.md) for the data model, token resolution
+rules, and the default prompt catalog.
+
+## Good Fit / Not a Fit
+
+**Good fit**
+
+- One developer running coding agents against one or more repositories, who
+  wants task state that outlives individual agent sessions.
+- Handoffs between agents, or between you and an agent, that need a durable
+  record of decisions and blockers.
+- Private projects where task descriptions and comments must never leave the
+  machine, but agents still need searchable project memory.
+- Coordinating work across several local projects and workstreams from one
+  board.
+
+**Not a fit**
+
+- Teams. The app is single-user: no accounts, permissions, or authentication.
+- Anything internet-facing or production-grade. It is a local development tool.
+- A replacement for a hosted issue tracker with integrations such as GitHub
+  Issues or Jira sync.
+- Fully autonomous prompt workflows. Prompts are copied by a human, and agents
+  interact only with tasks, boards, and comments.
+
+## Set Up Your Agents
+
+Claude Code and Codex are the two integrations named for v0.1.0. Other agents
+work through the same shell wrapper and HTTP API.
+
+### Claude Code
+
+The repo ships a Claude Code skill at `skills/tasks-management/` that teaches
+the agent to drive the API through the bundled `taskboards` wrapper. Symlink it
+into one of Claude Code's skill search paths.
+
+User-global, available in every project:
+
+```sh
+mkdir -p ~/.claude/skills
+ln -s "$PWD/skills/tasks-management" ~/.claude/skills/tasks-management
+```
+
+Project-local, available only inside one repo:
+
+```sh
+mkdir -p /path/to/your/project/.claude/skills
+ln -s "$PWD/skills/tasks-management" \
+  /path/to/your/project/.claude/skills/tasks-management
+```
+
+Optional environment variables for the wrapper. The defaults match the local
+Docker setup:
+
+- `TASKBOARDS_HOST_URL`: base URL, default `http://localhost:8142`.
+- `TASKBOARDS_API_KEY`: bearer token, only sent when set. The server itself
+  does not check it; it exists for authenticating proxies.
+- `TASKBOARDS_AGENT_NAME`: comment author name, default `Claude Code`.
+- `TASKBOARDS_AGENT_REF`: comment author reference; falls back to
+  `$CLAUDE_SESSION_ID` or `local`.
+
+Verify the install by starting a fresh Claude Code session in a project where
+the skill is installed and asking it to run `taskboards health`. The agent
+should pick the skill up automatically and report a healthy status.
+
+Once you trust the skill, add a permission rule to `.claude/settings.json`
+(shared with the project) or `.claude/settings.local.json` (personal,
+gitignored) so Claude Code stops prompting on every wrapper call:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(*/skills/tasks-management/scripts/taskboards *)",
+      "Bash(*/skills/tasks-management/scripts/taskboards)"
+    ]
+  }
+}
+```
+
+The wildcard prefix matches the wrapper regardless of install location
+(`~/.claude/skills/...`, `<project>/.claude/skills/...`, or the literal
+`${CLAUDE_SKILL_DIR}/...` form the agent may type). The second entry covers the
+bare `taskboards` invocation with no arguments. Permission patterns match the
+literal command string the agent sends to the Bash tool, so list every form you
+want to allow.
+
+### Tell your agent about the board
+
+Create a project and a board in the UI, then add a section like this to your
+project's `AGENTS.md` or `CLAUDE.md` so agents check the board before and
+after doing work:
+
+```markdown
+## Project Task Management
+
+Use the task-management skill for tracking project tasks. When performing tasks, you should check taskboard context and track tasks' states using the taskboards skill. This project data:
+
+- taskboards project: `my-project-name` _(create if not found)_
+- main board: `main` _(create if not found)_
+
+Keep up with the task boards: **check and update taskboard tasks often!**
+```
+
+### Codex
+
+<!--
+TODO(fill-the-readme-codex-fs7p52): replace this paragraph with the verified
+Codex install steps once document-and-verify-claude-rr9415 records them.
+-->
+Codex is the second named integration. Its step-by-step setup is still being
+verified and will land here before the release. Until then, point Codex at the
+wrapper and skill instructions as described under
+[Other agents](#other-agents).
+
+### Other agents
+
+Any agent that can run shell commands or make HTTP requests can use the board:
+
+- Give it `skills/tasks-management/SKILL.md`, which documents the wrapper
+  grammar, shortcuts, and safe patterns for long text bodies, and let it call
+  `skills/tasks-management/scripts/taskboards` directly.
+- Or call the markdown-first agent API under `/api/agents/` or the JSON API
+  under `/api/` yourself. See [API Orientation](#api-orientation).
+
+Set `TASKBOARDS_AGENT_NAME` so comments and activity show which agent wrote
+them.
+
+A typical agent session looks like this:
+
+```sh
+skills/tasks-management/scripts/taskboards health
+skills/tasks-management/scripts/taskboards get projects repositoryPath="$PWD"
+skills/tasks-management/scripts/taskboards get projects/<projectId>/boards
+skills/tasks-management/scripts/taskboards context <taskId>
+skills/tasks-management/scripts/taskboards move <taskId> in_progress
+skills/tasks-management/scripts/taskboards comment <taskId> --body-file /tmp/taskboards-note.md
+skills/tasks-management/scripts/taskboards get search q="sqlite migration blocker" limit=10
+```
+
+Agents should search before creating tasks so they update existing work instead
+of duplicating it, and should use `--body-file FILE`, `--field-file
+description=FILE`, or `--data FILE` for any text containing quotes, backticks,
+braces, or newlines.
 
 ## Configuration
 
-Docker Compose reads host-side settings from the shell or from an ignored
-`.env` file in the repository root. Every setting has a safe default, so `.env`
-is optional:
+`scripts/start-local.sh` writes its answers to an ignored `.env` file in the
+repository root. Docker Compose reads the same variables from the shell or
+from `.env`, and every setting has a safe default, so `.env` is optional:
 
 ```sh
 cp .env.example .env
@@ -137,115 +262,154 @@ Container-side paths and the internal port `8142` never change, so the API
 always sees `/data/taskboards.sqlite`, `/uploads`, and
 `/models/<TASKBOARDS_MODEL_FILE>`.
 
-**LAN exposure is unauthenticated.** The API and UI have no login, API keys, or
-rate limiting. With `TASKBOARDS_BIND_ADDRESS=0.0.0.0`, anyone who can reach
-your machine on the network can read and change every board. Keep the default
-loopback binding unless you trust the whole network, and prefer an SSH tunnel
-or a reverse proxy with authentication for remote access. See
-[SECURITY.md](SECURITY.md) for the full security model.
+The launcher manages every variable except `TASKBOARDS_DEBUG` and preserves any
+other entries you add to `.env`. The helper scripts and the launcher set
+`TASKBOARDS_DEBUG` themselves, so the `.env` value only matters when you run
+`docker compose` directly.
 
-`scripts/check-compose-config.sh` renders the default, custom-port,
-custom-storage, custom-model, and LAN configurations with
-`docker compose config` on the host and fails if any rendering is wrong.
+Runtime data lives in bind-mounted directories under the repository root
+(or wherever the variables above point):
 
-## Install the Skill for Claude Code
+- `data/`: the SQLite database, `data/taskboards.sqlite`.
+- `uploads/`: uploaded or imported files.
+- `models-gguf/`: GGUF embedding models, mounted read-only.
+- `tmp/`: scratch space; nothing here is durable.
 
-The repo ships a Claude Code skill at `skills/tasks-management/` that teaches
-agents how to drive the taskboards API through the bundled `taskboards` bash
-wrapper. To make Claude Code load it automatically, symlink the skill directory
-into one of Claude Code's skill search paths.
+All four are ignored by git except for their `.keep` placeholders. To back up
+an installation, stop the app and copy `data/` and `uploads/`.
 
-User-global (skill is available in every project):
+## Privacy and Network Security
+
+- All data stays local: task content, comments, uploads, embeddings, and the
+  model itself. Nothing phones home and there is no telemetry.
+- The API and UI have **no authentication, no API keys, and no rate
+  limiting**. The default `127.0.0.1` binding makes that safe: only processes
+  on your machine can reach the app.
+- **LAN exposure is unauthenticated.** With `TASKBOARDS_BIND_ADDRESS=0.0.0.0`,
+  anyone who can reach your machine on the network can read and change every
+  board. The launcher requires you to type `yes` after a warning before it
+  writes that setting. Keep the default unless you trust the whole network, and
+  prefer an SSH tunnel or an authenticating reverse proxy for remote access.
+- The Docker build context excludes `data/`, `uploads/`, `tmp/`, SQLite files,
+  and `.env`, so images never embed your database.
+
+[SECURITY.md](SECURITY.md) describes the full security model and how to report
+a vulnerability privately.
+
+## Supported Platforms
+
+Agent Taskboards runs wherever Docker with Compose v2 runs. For v0.1.0:
+
+| Platform                        | Status                                              |
+| ------------------------------- | --------------------------------------------------- |
+| macOS on Apple Silicon          | Supported; release validation target                |
+| Linux x86-64                    | Supported; release validation target                |
+| Windows                         | Not tested for v0.1.0. Docker Desktop with WSL 2 is the most likely path; run the launcher from a WSL shell |
+
+Continuous integration runs the checks on `linux/amd64` and `linux/arm64`.
+
+## Troubleshooting
+
+Every launcher failure prints an `error:` line and a `Recovery:` command. The
+cases below cover what the launcher cannot detect for you.
+
+- **Docker is not running or not installed.** The launcher stops before
+  touching anything. Start Docker Desktop or the Docker daemon and rerun
+  `scripts/start-local.sh`.
+- **Port `8142` is already in use.** Run `scripts/start-local.sh --reconfigure`
+  and choose another port, or set `TASKBOARDS_PORT` in `.env`.
+- **Semantic search says the model file was not found.** The app starts
+  without the model; only search and indexing need it. Check the resolved path
+  and availability:
+
+  ```sh
+  curl -s http://localhost:8142/api/health
+  ```
+
+  The `embedding.modelPath` field shows the container path and
+  `embedding.available` whether the file exists. Make sure the file named by
+  `TASKBOARDS_MODEL_FILE` is inside `TASKBOARDS_MODEL_DIR`, or rerun the
+  launcher with `--reconfigure` to download it again.
+- **The model download failed or a digest mismatch was reported.** Downloads
+  are verified against a pinned SHA-256 digest and never overwrite a working
+  file. Rerun the launcher to retry; when an existing file fails verification,
+  the launcher offers to re-download it.
+- **The first start is slow.** The first `docker compose up --build` downloads
+  the base image and installs dependencies, including native modules for
+  `node-llama-cpp`. Later starts reuse the image.
+- **Changes to `.env` do not seem to apply.** Restart with
+  `docker compose down` followed by your usual start command. Note that the
+  launcher and helper scripts override `TASKBOARDS_DEBUG`.
+- **The LAN option was declined.** The launcher only writes `0.0.0.0` after a
+  literal `yes`. Any other answer keeps the localhost binding.
+- **Starting over.** Stop the app, then `scripts/start-local.sh --reconfigure`
+  rewrites only the launcher-managed keys in `.env`. Your data in `data/` and
+  `uploads/` is untouched unless you delete those directories yourself.
+
+Still stuck? Open a
+[setup help issue](https://github.com/WarehouseRobotics/agent-taskboards/issues/new?template=setup-help.yml)
+with your platform and the launcher output. Redact anything private first.
+
+## Manual Setup
+
+The launcher is a convenience over plain Docker Compose. You can do each step
+yourself.
+
+### Embedding model
+
+Semantic search needs a GGUF embedding model. The default, expected by Compose
+and by the launcher, is the full-precision F32 build of `bge-small-en-v1.5`:
+
+```text
+models-gguf/bge-small-en-v1.5-f32.gguf
+```
+
+Download it from Hugging Face:
 
 ```sh
-mkdir -p ~/.claude/skills
-ln -s "$PWD/skills/tasks-management" ~/.claude/skills/tasks-management
+mkdir -p models-gguf
+curl -L \
+  -o models-gguf/bge-small-en-v1.5-f32.gguf \
+  https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-f32.gguf
 ```
 
-Project-local (skill is available only inside one repo):
+To use a smaller quantized build (`q8_0`, `q4_k_m`, `f16`) or any other GGUF
+embedding model, download it to `models-gguf/` and set `TASKBOARDS_MODEL_FILE`
+in `.env` to its file name; point `TASKBOARDS_MODEL_DIR` elsewhere if the file
+lives outside the repo. The app starts without a model, but semantic search
+stays unavailable until the file exists.
+
+### Release mode
+
+Release mode builds the API and UI into `dist/` and serves both from one
+Express server on port `8142`:
 
 ```sh
-mkdir -p /path/to/your/project/.claude/skills
-ln -s "$PWD/skills/tasks-management" \
-  /path/to/your/project/.claude/skills/tasks-management
+TASKBOARDS_DEBUG= docker compose up --build
 ```
 
-Optional environment variables (defaults work for the local Docker setup):
+`scripts/run-release.sh` does the same and accepts `docker compose up`
+arguments such as `--build` or `-d`.
 
-- `TASKBOARDS_HOST_URL` — base URL, default `http://localhost:8142`.
-- `TASKBOARDS_API_KEY` — bearer token; only sent when set.
-- `TASKBOARDS_AGENT_NAME` — comment author name, default `Claude Code`.
-- `TASKBOARDS_AGENT_REF` — comment author reference; falls back to
-  `$CLAUDE_SESSION_ID` or `local`.
+### Debug mode
 
-Verify the install by starting a fresh Claude Code session in a project where
-the skill is installed and asking it to run `taskboards health`. The agent
-should pick the skill up automatically and respond with a healthy status block.
+`docker-compose.yml` defaults to `TASKBOARDS_DEBUG=1`, which runs the Vite UI
+on port `8142` and the Express API on port `3000` inside the container, with
+Vite proxying `/api` to the API. Source changes reload without a rebuild:
 
-If you played around and feel secure about letting the task management skill
-work freely, add a permission rule to `.claude/settings.json` (shared with the
-project) or `.claude/settings.local.json` (personal, gitignored) so Claude Code
-stops prompting on every wrapper call:
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(*/skills/tasks-management/scripts/taskboards *)",
-      "Bash(*/skills/tasks-management/scripts/taskboards)"
-    ]
-  }
-}
+```sh
+docker compose up --build
 ```
 
-The wildcard prefix matches the wrapper regardless of install location
-(`~/.claude/skills/...`, `<project>/.claude/skills/...`, or the literal
-`${CLAUDE_SKILL_DIR}/...` form the agent may type). The second entry covers
-the bare `taskboards` invocation with no trailing arguments. Permission
-patterns match the literal command string the agent sends to the Bash tool —
-they are not shell-expanded — so list every form you want to allow.
+Helper scripts wrap the common cases and run from any directory:
 
-Other agents that follow Claude's `SKILL.md` convention can use the same
-symlink approach into their own skill directory.
+- `scripts/run.sh`: debug mode with the existing image.
+- `scripts/run-build.sh`: rebuild the image, then debug mode.
+- `scripts/run-release.sh`: release mode; add `--build` to rebuild.
 
-## Adjust Your Project AGENTS.md/CLAUDE.md
+## Development
 
-Go to the UI and create the project and the board (that's optional, but recommended). 
-Then, in your project instructions file, add the following (or similar):
-
-```
-## Project Task Management
-
-Use the task-management skill for tracking project tasks. When performing tasks, you should check taskboard context and track tasks' states using the taskboards skill. This project data:
-
-- taskboards project: `my-project-name` _(create if not found)_
-- main board: `main` _(create if not found)_
-
-Keep up with the task boards: **check and update taskboard tasks often!**
-
-```
-
-
-
-## Runtime Data
-
-Docker Compose bind-mounts local runtime directories from the repository root:
-
-- `data/` -> `/data`: durable application data. The default SQLite database is
-  `/data/taskboards.sqlite`.
-- `uploads/` -> `/uploads`: durable uploaded or imported files.
-- `tmp/` -> `/tmp/taskboards`: scratch space for temporary generated files.
-- `models-gguf/` -> `/models` (read-only): GGUF embedding models.
-
-These directories are ignored by git except for their `.keep` placeholders. The
-data, uploads, and model locations can be moved with the variables in
-[Configuration](#configuration); data and uploads persist across container
-recreation because they live on the host.
-
-## Development Commands
-
-Project scripts are intended to run inside Docker. Do not run `npm install` on
-the host machine.
+Project scripts run inside Docker. Do not run `npm install` on the host.
 
 Run checks in the running container:
 
@@ -253,11 +417,6 @@ Run checks in the running container:
 docker compose exec taskboards npm run typecheck
 docker compose exec taskboards npm run lint
 docker compose exec taskboards npm run test
-```
-
-Build the app:
-
-```sh
 docker compose exec taskboards npm run build
 ```
 
@@ -271,66 +430,25 @@ scripts/ci.sh
 scripts/ci.sh test lint
 ```
 
-Rebuild local embedding search data:
+Rebuild the embedding index or run the embedding smoke test:
 
 ```sh
 docker compose exec taskboards npm run embeddings:reindex
-```
-
-Run the embedding smoke test:
-
-```sh
 docker compose exec taskboards npm run test:embeddings
 ```
 
-## Typical Workflows
+`scripts/check-compose-config.sh` renders the default, custom-port,
+custom-storage, custom-model, and LAN configurations with
+`docker compose config` and fails if any rendering is wrong.
 
-Create a project for a repository or workstream, then create one or more boards
-for active implementation, backlog planning, release work, or bug triage.
-
-Use the board UI to create tasks, edit descriptions, assign labels and
-priorities, move work through columns, inspect task context, and search prior
-work. Active boards hide archived content by default so the working view stays
-focused.
-
-Use comments as durable memory. Humans and agents can leave progress notes,
-blockers, decisions, and handoff context on a task. Activity entries preserve
-important state changes such as task creation, updates, movement, completion,
-archival, and new comments.
-
-Agents can use the API or the wrapper script in
-`skills/tasks-management/scripts/taskboards` to orient themselves before doing
-work:
-
-```sh
-skills/tasks-management/scripts/taskboards health
-skills/tasks-management/scripts/taskboards get projects repositoryPath="$PWD"
-skills/tasks-management/scripts/taskboards get projects/<projectId>/boards
-skills/tasks-management/scripts/taskboards context <taskId>
-skills/tasks-management/scripts/taskboards move <taskId> in_progress
-skills/tasks-management/scripts/taskboards move-board <taskId> <boardId>
-skills/tasks-management/scripts/taskboards comment <taskId> --body-file /tmp/taskboards-note.md
-```
-
-Use file-backed writes for generated markdown, multiline comments, and long
-task descriptions. Short inline comments are supported, but agents should use
-`--body-file FILE`, `--field-file description=FILE`, or full JSON via
-`--data FILE` when text contains quotes, backticks, braces, or newlines.
-
-Search before creating new tasks so agents can update existing work instead of
-duplicating it:
-
-```sh
-skills/tasks-management/scripts/taskboards get search q="sqlite migration blocker" limit=10
-```
+[CONTRIBUTING.md](CONTRIBUTING.md) covers pull-request expectations.
 
 ## API Orientation
 
-The JSON API is mounted under `/api`.
+The JSON API is mounted under `/api`; the markdown-first agent API that the
+wrapper uses is under `/api/agents`. Useful starting points:
 
-Useful starting points:
-
-- `GET /api/health`: check API and database status.
+- `GET /api/health`: API, database, and embedding model status.
 - `GET /api/projects`: list active projects.
 - `POST /api/projects`: create a project.
 - `GET /api/projects/:projectId/boards`: list boards for a project.
@@ -345,24 +463,9 @@ Useful starting points:
 - `POST /api/search`: run local semantic search over indexed board, task, and
   comment content.
 
-See [docs/api.md](docs/api.md) for the full API contract.
-
-## Security
-
-Agent Taskboards is single-user by design: the API and UI have no
-authentication, so the app is safe on the default `127.0.0.1` binding and
-exposed to anyone on the network when bound to `0.0.0.0`. Data stays on your
-machine and there is no telemetry. [SECURITY.md](SECURITY.md) describes the
-security model, the localhost-versus-LAN boundary, and how to report a
-vulnerability privately.
-
-## Contributing
-
-Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the
-Docker-based development setup, how to run the CI checks locally with
-`scripts/ci.sh`, and pull-request expectations. For bugs, setup problems, and
-agent-integration feedback, use the issue templates in GitHub's new-issue
-flow.
+Default workflow columns are `backlog`, `ready`, `in_progress`, `blocked`,
+`review`, and `done`. See [docs/api.md](docs/api.md) for the full JSON
+contract and [docs/agent-api.md](docs/agent-api.md) for the agent API.
 
 ## Documentation
 
@@ -375,6 +478,16 @@ flow.
 - [docs/text-embedding.md](docs/text-embedding.md): local embeddings and vector
   search.
 - [docs/maintenance.md](docs/maintenance.md): archival, cleanup, and reindexing.
+- [CHANGELOG.md](CHANGELOG.md): what changed in each release.
+
+## Public Preview Status
+
+v0.1.0 is a public preview: the API and UI may still change before a 1.0
+release, and only the platforms and integrations named above have been
+validated. Bug reports, setup problems, and
+agent-integration feedback are welcome through the
+[issue templates](https://github.com/WarehouseRobotics/agent-taskboards/issues/new/choose).
+Security concerns go through [SECURITY.md](SECURITY.md), not public issues.
 
 ## Tech Stack
 

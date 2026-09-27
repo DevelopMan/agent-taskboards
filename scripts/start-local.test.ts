@@ -41,7 +41,7 @@ describe("start-local.sh", () => {
   let fixture: Buffer;
   let fixtureSha: string;
 
-  const modelFile = "bge-small-en-v1.5-q8_0.gguf";
+  const modelFile = "bge-small-en-v1.5-f32.gguf";
   const happyInput = "1\n\n\n\n\n";
 
   beforeEach(() => {
@@ -64,10 +64,10 @@ describe("start-local.sh", () => {
 
     manifestPath = join(tmpDir, "manifest.txt");
     const entries = [
+      ["f32", "bge-small-en-v1.5-f32.gguf"],
       ["q8", "bge-small-en-v1.5-q8_0.gguf"],
       ["q4", "bge-small-en-v1.5-q4_k_m.gguf"],
       ["f16", "bge-small-en-v1.5-f16.gguf"],
-      ["f32", "bge-small-en-v1.5-f32.gguf"],
     ]
       .map(
         ([key, file]) =>
@@ -217,6 +217,22 @@ if (mode === "hang") {
     const up = dockerCalls().at(-1);
     expect(up?.args).toEqual(["compose", "up", "--build"]);
     expect(up?.debug).toBe("");
+  });
+
+  it("preselects the F32 model when the model prompt is answered with the default", () => {
+    const result = runSetup([], "\n\n\n\n\n");
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("1) F32 (default)");
+    expect(envFile()).toContain("TASKBOARDS_MODEL_FILE=bge-small-en-v1.5-f32.gguf");
+    expect(existsSync(join(repoDir, "models-gguf", "bge-small-en-v1.5-f32.gguf"))).toBe(true);
+  });
+
+  it("selects the Q8 model from menu option 2", () => {
+    const result = runSetup([], "2\n\n\n\n\n");
+
+    expect(result.status).toBe(0);
+    expect(envFile()).toContain("TASKBOARDS_MODEL_FILE=bge-small-en-v1.5-q8_0.gguf");
   });
 
   it("passes extra arguments through to docker compose up", () => {
@@ -433,7 +449,7 @@ if (mode === "hang") {
   it("rejects a manifest whose file name escapes the model directory", () => {
     writeFileSync(
       manifestPath,
-      `q8|../evil.gguf|${fixture.length}|${fixtureSha}|http://example.invalid/evil.gguf\n`,
+      `f32|../evil.gguf|${fixture.length}|${fixtureSha}|http://example.invalid/evil.gguf\n`,
     );
 
     const result = runSetup([], happyInput);

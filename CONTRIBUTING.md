@@ -19,7 +19,7 @@ dependencies are installed only inside the image, and the Dockerfile uses
 
 1. Clone the repository.
 2. Optionally download the local embedding model as described in
-   [README.md](README.md#before-first-run-download-the-embeddings-model). The
+   [README.md](README.md#manual-setup). The
    app and every check work without it; only semantic search needs it.
 3. Start the app in debug (watch) mode:
 
@@ -31,7 +31,8 @@ dependencies are installed only inside the image, and the Dockerfile uses
    pick up source changes without a rebuild.
 
 Release mode, host-side configuration, and the runtime directories are
-documented in [README.md](README.md#quick-start).
+documented in the README under [Manual Setup](README.md#manual-setup) and
+[Configuration](README.md#configuration).
 
 ## Running Checks
 

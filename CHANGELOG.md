@@ -6,11 +6,22 @@ Important changes to Agent Taskboards are documented in this file.
 
 ### 2026-09-27
 
+- **README rewrite for the v0.1.0 public preview**
+  (`rewrite-the-readme-for-bv12lx`): The README now leads with the launch
+  positioning (local Kanban and durable memory for coding agents), the
+  one-command `scripts/start-local.sh` quick start, and the three
+  differentiators, followed by the prompt library as a secondary
+  differentiator with its current boundaries, Good fit / Not a fit, agent
+  setup for Claude Code with a Codex section pending verification, supported
+  platforms, privacy and LAN-security notes, troubleshooting, and a manual
+  Docker Compose setup. The launcher's model menu now preselects F32, so the
+  interactive path, the manual path, and the Compose default all resolve to
+  `bge-small-en-v1.5-f32.gguf`.
 - **Interactive first-run setup and release launcher**
   (`build-interactive-first-run-t95ve7`): `scripts/start-local.sh` checks
   Docker and Docker Compose, then interactively configures a new installation:
-  embedding model (Q8 recommended; Q4, F16, F32, or a validated existing GGUF
-  file, with download sizes and tradeoffs shown), host port, data and uploads
+  embedding model (F32 by default, matching Compose; Q8, Q4, F16, or a
+  validated existing GGUF file, with download sizes and tradeoffs shown), host port, data and uploads
   directories, and network binding. Curated models download to a temporary
   file, are verified against a pinned SHA-256 digest, and install atomically;
   interrupted or failed downloads clean up after themselves and print a
