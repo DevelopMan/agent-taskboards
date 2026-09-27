@@ -199,14 +199,54 @@ Keep up with the task boards: **check and update taskboard tasks often!**
 
 ### Codex
 
-<!--
-TODO(fill-the-readme-codex-fs7p52): replace this paragraph with the verified
-Codex install steps once document-and-verify-claude-rr9415 records them.
--->
-Codex is the second named integration. Its step-by-step setup is still being
-verified and will land here before the release. Until then, point Codex at the
-wrapper and skill instructions as described under
-[Other agents](#other-agents).
+Codex uses the same bundled `skills/tasks-management/` skill. From your cloned
+Agent Taskboards directory, symlink it into a [Codex skill search
+path](https://learn.chatgpt.com/docs/build-skills).
+
+User-global, available in every project:
+
+```sh
+mkdir -p ~/.agents/skills
+ln -s "$PWD/skills/tasks-management" ~/.agents/skills/tasks-management
+```
+
+Project-local, available only inside one repo (replace the example path with
+that repo's path):
+
+```sh
+mkdir -p /path/to/your/project/.agents/skills
+ln -s "$PWD/skills/tasks-management" \
+  /path/to/your/project/.agents/skills/tasks-management
+```
+
+The wrapper defaults its comment author to `Claude Code`. For Codex CLI, set
+the author name in the shell before starting a Codex session:
+
+```sh
+export TASKBOARDS_AGENT_NAME=Codex
+```
+
+For Codex desktop, tell Codex to use `TASKBOARDS_AGENT_NAME=Codex` on its
+wrapper calls. You can also set `TASKBOARDS_AGENT_REF` to a session reference;
+otherwise the wrapper uses `$CLAUDE_SESSION_ID` when present, or `local`.
+`TASKBOARDS_HOST_URL` defaults to `http://localhost:8142`.
+
+Start a fresh Codex session in the target project. In Codex CLI, mention
+`$tasks-management` explicitly; in Codex desktop, select the skill in the
+composer. Ask Codex to run the matching one-line health command. For a global
+install:
+
+```sh
+~/.agents/skills/tasks-management/scripts/taskboards health
+```
+
+For a project-local install, run from the target repo's root:
+
+```sh
+./.agents/skills/tasks-management/scripts/taskboards health
+```
+
+The response should say `Agent Taskboards is healthy`.
 
 ### Other agents
 
