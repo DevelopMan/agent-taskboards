@@ -6,6 +6,19 @@ Important changes to Agent Taskboards are documented in this file.
 
 ### 2026-09-27
 
+- **Interactive first-run setup and release launcher**
+  (`build-interactive-first-run-t95ve7`): `scripts/start-local.sh` checks
+  Docker and Docker Compose, then interactively configures a new installation:
+  embedding model (Q8 recommended; Q4, F16, F32, or a validated existing GGUF
+  file, with download sizes and tradeoffs shown), host port, data and uploads
+  directories, and network binding. Curated models download to a temporary
+  file, are verified against a pinned SHA-256 digest, and install atomically;
+  interrupted or failed downloads clean up after themselves and print a
+  recovery command. LAN binding requires an explicit acknowledgement that the
+  API is unauthenticated. The script persists only its managed keys in the
+  ignored `.env`, preserving other entries, reuses a valid configuration on
+  later runs (`--reconfigure` to change it), and launches release mode with
+  `docker compose up --build`.
 - **Contributor, support, and security guidance**
   (`add-contributor-support-and-w2r4tw`): `CONTRIBUTING.md` documents the
   Docker-based development workflow, local CI via `scripts/ci.sh`, and

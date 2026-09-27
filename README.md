@@ -66,7 +66,18 @@ exists; `GET /api/health` reports the resolved path and whether it was found.
 
 ## Quick Start
 
-Start the app in Docker:
+For a guided first run, `scripts/start-local.sh` checks Docker, walks through
+the embedding model download, port, storage, and network binding, and then
+starts release mode:
+
+```sh
+scripts/start-local.sh
+```
+
+It reuses a valid existing configuration on later runs; pass `--reconfigure`
+to change it.
+
+Alternatively, start the app in Docker directly:
 
 ```sh
 docker compose up --build
