@@ -125,13 +125,32 @@ comment context.
 The prompt library manages reusable prompt texts for agent sessions. It opens
 from the sidebar `Prompts` entry, between Search and Maintenance:
 
+- a wrapping row of library pills sits under the topbar, one per library in
+  position order with the selected one highlighted; it wraps at narrow widths
+  rather than scrolling, and a trailing `+` pill turns into an inline name
+  input (Enter creates and selects the library, Escape or blur cancels)
+- the selected pill scopes everything below it: the rail's categories and
+  counts, the All prompts and Uncategorized filters, the prompt list, the
+  editor's category checkboxes, drag reorder, and where New prompt and New
+  category land; selecting a pill resets the filter to All prompts and closes
+  the open draft, blocked by the same unsaved-changes rule as switching prompts
+- double-click or F2 on a non-Default pill swaps it for an inline rename input
+  (Enter saves, Escape or blur cancels); the Default pill ignores both and its
+  tooltip says it is fixed
+- non-Default pills carry an `x` that opens a confirmation naming the library
+  and the number of prompts and categories that go with it; after the delete
+  the selection moves to Default
+- the selected library is remembered in the browser under
+  `taskboards.prompts.libraryId` and falls back to Default when the stored id
+  no longer exists
 - a left rail lists All prompts, Uncategorized, and each category with counts
 - the middle list shows prompts for the current filter with usage metadata
 - the right editor pane edits name, note, body, and category membership in
   place; the author's note shows as static text and becomes editable on click
 - editor changes save explicitly with Save or Cmd/Ctrl+Enter from any field;
   the shortcut also submits the new-category and rename-category forms
-- toolbar actions cover new prompt, new category, and restore defaults
+- toolbar actions cover new prompt and new category; `Restore defaults` is
+  rendered only while the Default library is selected
 - prompts and rail categories reorder by dragging, with a drop indicator on the
   side the dragged row will land on; `Alt+Up`/`Alt+Down` on a focused row is the
   pointer-free equivalent, stepping one visible row at a time

@@ -1,5 +1,130 @@
 /* Prompt library workspace */
 
+/* Library pills: a sub-toolbar under the Topbar that wraps instead of
+   scrolling, so every library stays reachable at narrow widths. */
+.prompts-libraries {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 36px;
+  padding: var(--s-1) var(--s-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-surface);
+}
+
+.prompts-library {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  border: 1px solid var(--line-faint);
+  border-radius: var(--r-xl);
+  background: var(--bg-surface-2);
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+}
+
+.prompts-library:hover {
+  border-color: var(--line);
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.prompts-library--active {
+  border-color: var(--accent);
+  background: var(--bg-active);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.prompts-library__select,
+.prompts-library__remove,
+.prompts-libraries__add {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.prompts-library__select {
+  max-width: 240px;
+  overflow: hidden;
+  padding: 0 var(--s-3);
+  border-radius: inherit;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The pill keeps its right padding when it carries an `x`, so the glyph sits
+   inside the rounded end instead of hanging off it. */
+.prompts-library__select:has(+ .prompts-library__remove) {
+  padding-right: var(--s-1);
+}
+
+/* Always in the DOM for the keyboard; visually quiet until the pill is
+   hovered or focused so the row does not read as a line of delete buttons. */
+.prompts-library__remove {
+  display: inline-grid;
+  width: 20px;
+  height: 22px;
+  place-items: center;
+  margin-right: 2px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--fg-faint);
+  opacity: 0.55;
+}
+
+.prompts-library:hover .prompts-library__remove,
+.prompts-library:focus-within .prompts-library__remove {
+  opacity: 1;
+}
+
+.prompts-library__remove:hover {
+  background: var(--bg-active);
+  color: var(--fg);
+}
+
+.prompts-library--editing {
+  padding: 0 var(--s-1);
+}
+
+.prompts-library__input {
+  width: 160px;
+  height: 20px;
+  padding: 0 var(--s-2);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-input);
+  color: var(--fg);
+  font: inherit;
+}
+
+.prompts-libraries__add {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-xl);
+  color: var(--fg-faint);
+}
+
+.prompts-libraries__add:hover:not(:disabled) {
+  border-style: solid;
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.prompts-library__select:focus-visible,
+.prompts-library__remove:focus-visible,
+.prompts-libraries__add:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .prompts-layout {
   display: flex;
   flex: 1;

@@ -13,9 +13,15 @@ import {
   Mono,
   SkeletonRows,
 } from "../../components/ui";
-import type { Prompt } from "../../domain/types";
+import type { Prompt, PromptLibrary } from "../../domain/types";
 import { apiMessage } from "../../lib/errors";
 import { formatDate } from "../../lib/format";
+import {
+  persistLibraryId,
+  promptManagerLibraryStorageKey,
+  resolveSelectedLibrary,
+  storedLibraryId,
+} from "./prompt-library-selection";
 import {
   categoriesInLibrary,
   promptCountByCategory,
@@ -44,6 +50,13 @@ interface PromptDraft {
   categoryIds: string[];
 }
 
+// One inline name input serves both the trailing `+` pill (libraryId null)
+// and a pill being renamed, so at most one of them is open at a time.
+interface LibraryNameDraft {
+  libraryId: string | null;
+  name: string;
+}
+
 export function PromptsWorkspace() {
   const library = usePromptLibrary();
   const [filter, setFilter] = useState<PromptFilter>({ type: "all" });
@@ -62,10 +75,17 @@ export function PromptsWorkspace() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(() =>
+    storedLibraryId(promptManagerLibraryStorageKey),
+  );
+  const [libraryNameDraft, setLibraryNameDraft] = useState<LibraryNameDraft | null>(null);
+  const [pendingDeleteLibraryId, setPendingDeleteLibraryId] = useState<string | null>(null);
 
-  // Interim scope until the library pills land: everything below works on
-  // the Default library only.
-  const libraryId = library.defaultLibrary?.id ?? null;
+  // The selected pill scopes everything below it. A remembered id that no
+  // longer exists resolves to Default on every render, so a library deleted
+  // elsewhere never leaves the workspace pointing at nothing.
+  const selectedLibrary = resolveSelectedLibrary(library.libraries, selectedLibraryId);
+  const libraryId = selectedLibrary?.id ?? null;
   const prompts = useMemo(
     () => promptsInLibrary(library.prompts, libraryId),
     [library.prompts, libraryId],
@@ -313,8 +333,92 @@ export function PromptsWorkspace() {
     }
   };
 
-  // Prompts carry one global order, so a drop inside a category view is
-  // resolved against the full list, never against the filtered rows.
+  // Every open draft belongs to the current library (new prompts are created
+  // in it, and the list only shows its prompts), so a permitted switch always
+  // closes the draft. Dirty edits block the switch exactly as they block
+  // opening another prompt; Cancel stays the only discard path.
+  const selectLibrary = (target: PromptLibrary) => {
+    if (target.id === libraryId) {
+      return;
+    }
+    if (draftBlocksSwitching()) {
+      return;
+    }
+    setSelectedLibraryId(target.id);
+    persistLibraryId(promptManagerLibraryStorageKey, target.id);
+    setFilter({ type: "all" });
+    setDraft(null);
+    setNoteEditing(false);
+    setLibraryNameDraft(null);
+    setCategoryNameDraft(null);
+    setCreatingCategory(false);
+    setNewCategoryName("");
+  };
+
+  const startLibraryRename = (target: PromptLibrary) => {
+    if (target.isDefault) {
+      return;
+    }
+    setMutationError(null);
+    setLibraryNameDraft({ libraryId: target.id, name: target.name });
+  };
+
+  // The input closes before the request goes out: a blur fired by the input
+  // leaving the DOM must not read as a cancel, and the pill shows the old
+  // name for the few milliseconds until the reload lands.
+  const submitLibraryName = async () => {
+    if (!libraryNameDraft) {
+      return;
+    }
+    const name = libraryNameDraft.name.trim();
+    const current = libraryNameDraft.libraryId
+      ? library.libraries.find((item) => item.id === libraryNameDraft.libraryId) ?? null
+      : null;
+    setLibraryNameDraft(null);
+    if (!name || (current && name === current.name)) {
+      return;
+    }
+    setMutationError(null);
+    try {
+      if (current) {
+        await library.renameLibrary(current.id, { name });
+        showStatus("Library renamed");
+      } else {
+        const created = await library.createLibrary({ name });
+        selectLibrary(created);
+        showStatus("Library created");
+      }
+    } catch (cause) {
+      setMutationError(apiMessage(cause));
+    }
+  };
+
+  const libraryNameKeys = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void submitLibraryName();
+    } else if (event.key === "Escape") {
+      event.stopPropagation();
+      setLibraryNameDraft(null);
+    }
+  };
+
+  const pendingDeleteLibrary =
+    pendingDeleteLibraryId !== null
+      ? library.libraries.find((item) => item.id === pendingDeleteLibraryId) ?? null
+      : null;
+  // Counts come from the loaded rows, which the dialog names before the
+  // server cascades the delete.
+  const pendingDeleteLibraryCounts = pendingDeleteLibrary
+    ? {
+        prompts: promptsInLibrary(library.prompts, pendingDeleteLibrary.id).length,
+        categories: categoriesInLibrary(library.categories, pendingDeleteLibrary.id).length,
+      }
+    : null;
+
+  // Prompts carry one order per library, so a drop inside a category view is
+  // resolved against the library's full list, never against the filtered
+  // rows. Both lists are already scoped to the selected library.
   const orderedIds = (kind: "prompt" | "category") =>
     kind === "prompt"
       ? prompts.map((prompt) => prompt.id)
@@ -430,14 +534,16 @@ export function PromptsWorkspace() {
       <Topbar
         actions={
           <>
-            <Button
-              disabled={restoring || library.loading}
-              icon={<Icon name="refresh" />}
-              onClick={() => void restoreDefaults()}
-              variant="ghost"
-            >
-              Restore defaults
-            </Button>
+            {selectedLibrary?.isDefault && (
+              <Button
+                disabled={restoring || library.loading}
+                icon={<Icon name="refresh" />}
+                onClick={() => void restoreDefaults()}
+                variant="ghost"
+              >
+                Restore defaults
+              </Button>
+            )}
             <Button
               disabled={library.loading}
               icon={<Icon name="plus" />}
@@ -450,6 +556,103 @@ export function PromptsWorkspace() {
         }
         crumbs={[{ label: "Prompts", icon: <Icon name="prompt" /> }]}
       />
+      <div aria-label="Prompt libraries" className="prompts-libraries" role="group">
+        {library.libraries.map((item) => {
+          const active = item.id === libraryId;
+          if (libraryNameDraft?.libraryId === item.id) {
+            return (
+              <span
+                className="prompts-library prompts-library--active prompts-library--editing"
+                key={item.id}
+              >
+                <input
+                  aria-label={`Rename library ${item.name}`}
+                  autoFocus
+                  className="prompts-library__input"
+                  onBlur={() => setLibraryNameDraft(null)}
+                  onChange={(event) =>
+                    setLibraryNameDraft((current) =>
+                      current ? { ...current, name: event.target.value } : current,
+                    )
+                  }
+                  onKeyDown={libraryNameKeys}
+                  value={libraryNameDraft.name}
+                />
+              </span>
+            );
+          }
+          return (
+            <span
+              className={active ? "prompts-library prompts-library--active" : "prompts-library"}
+              key={item.id}
+            >
+              <button
+                aria-pressed={active}
+                className="prompts-library__select"
+                onClick={() => selectLibrary(item)}
+                onDoubleClick={() => startLibraryRename(item)}
+                onKeyDown={(event) => {
+                  if (event.key === "F2") {
+                    event.preventDefault();
+                    startLibraryRename(item);
+                  }
+                }}
+                title={
+                  item.isDefault
+                    ? "The Default library ships the system catalog and cannot be renamed or deleted"
+                    : "Double-click or press F2 to rename"
+                }
+                type="button"
+              >
+                {item.name}
+              </button>
+              {!item.isDefault && (
+                <button
+                  aria-label={`Delete library ${item.name}`}
+                  className="prompts-library__remove"
+                  onClick={() => setPendingDeleteLibraryId(item.id)}
+                  title="Delete library"
+                  type="button"
+                >
+                  <Icon name="close" size={10} />
+                </button>
+              )}
+            </span>
+          );
+        })}
+        {libraryNameDraft?.libraryId === null ? (
+          <span className="prompts-library prompts-library--editing">
+            <input
+              aria-label="New library name"
+              autoFocus
+              className="prompts-library__input"
+              onBlur={() => setLibraryNameDraft(null)}
+              onChange={(event) =>
+                setLibraryNameDraft((current) =>
+                  current ? { ...current, name: event.target.value } : current,
+                )
+              }
+              onKeyDown={libraryNameKeys}
+              placeholder="Library name"
+              value={libraryNameDraft.name}
+            />
+          </span>
+        ) : (
+          <button
+            aria-label="New library"
+            className="prompts-libraries__add"
+            disabled={library.loading}
+            onClick={() => {
+              setMutationError(null);
+              setLibraryNameDraft({ libraryId: null, name: "" });
+            }}
+            title="New library"
+            type="button"
+          >
+            <Icon name="plus" size={12} />
+          </button>
+        )}
+      </div>
       <InlineError message={library.error ?? mutationError} />
       <div className="prompts-layout">
         <aside className="prompts-rail">
@@ -821,8 +1024,42 @@ export function PromptsWorkspace() {
           title="Delete category?"
         />
       )}
+      {pendingDeleteLibrary && pendingDeleteLibraryCounts && (
+        <ConfirmDialog
+          confirmLabel="Delete library"
+          danger
+          message={
+            <p>
+              This permanently deletes the library “{pendingDeleteLibrary.name}” together
+              with its {countLabel(pendingDeleteLibraryCounts.prompts, "prompt")} and{" "}
+              {countLabel(pendingDeleteLibraryCounts.categories, "category", "categories")}.
+              This cannot be undone.
+            </p>
+          }
+          onCancel={() => setPendingDeleteLibraryId(null)}
+          onConfirm={async () => {
+            await library.deleteLibrary(pendingDeleteLibrary.id);
+            setPendingDeleteLibraryId(null);
+            if (pendingDeleteLibrary.id === libraryId) {
+              // The open draft, if any, lived in the deleted library and is
+              // gone with it; nothing here is worth an unsaved-changes stop.
+              const fallback = library.defaultLibrary?.id ?? null;
+              setSelectedLibraryId(fallback);
+              persistLibraryId(promptManagerLibraryStorageKey, fallback);
+              setFilter({ type: "all" });
+              setDraft(null);
+              setNoteEditing(false);
+            }
+          }}
+          title="Delete library?"
+        />
+      )}
     </>
   );
+}
+
+function countLabel(count: number, singular: string, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
 }
 
 function PromptFilterItem({
