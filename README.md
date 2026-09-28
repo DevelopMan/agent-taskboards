@@ -79,14 +79,19 @@ rendered as `"title" ( id=... )` references. Paste it into your agent session
 and the agent has the exact task, its umbrella task, and the board and project
 names to orient itself with.
 
-The library ships with a starter set of planning, implementation, review, and
-follow-up prompts organized in categories. You can edit them, add your own,
-and restore the defaults at any time. Prompt and category names accept
-emoji.
+Prompts are organized in libraries. The `Default` library ships with a starter
+set of planning, implementation, review, and follow-up prompts organized in
+categories; you can edit them, add your own, and restore the defaults at any
+time. Further libraries keep separate sets of categories and prompts, and each
+library can be exported to a JSON file and imported again on this or another
+machine. Upgrading from a version without libraries moves your existing
+prompts into a `Custom` library next to a fresh `Default`. Prompt, category,
+and library names accept emoji.
 
 Current boundaries, so you know what you are getting:
 
-- One global library shared by all projects; no per-project prompts.
+- Libraries are global, not per project: every library is visible from every
+  task, and a prompt cannot move between libraries.
 - Clipboard-mediated: a human copies the rendered prompt into the agent. Agents
   do not browse or fetch prompts on their own.
 - Prompts are not indexed for semantic search.

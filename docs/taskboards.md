@@ -54,9 +54,10 @@ project -> board -> task -> comments/activity
   ordering, optional metadata, and durable identifiers.
 - Comments and activity provide append-only context for task decisions, agent
   notes, handoffs, and status updates.
-- A global prompt library stores reusable prompt texts, organized by optional
+- Prompt libraries store reusable prompt texts, organized by optional
   categories, that humans copy into agent sessions from the task detail's
-  prompt picker. See `docs/prompts.md`.
+  prompt picker. Libraries are global rather than per project; a `Default`
+  library ships the built-in catalog. See `docs/prompts.md`.
 
 Columns represent workflow state on a board. The exact default columns can
 evolve, but the model should support common Kanban states such as backlog,

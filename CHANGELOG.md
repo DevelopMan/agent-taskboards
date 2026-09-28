@@ -19,6 +19,29 @@ Important changes to Agent Taskboards are documented in this file.
   validated whole and written in one transaction. The import route accepts
   bodies up to 5 MB, and oversized or malformed JSON bodies on any route now
   answer with `413`/`400` instead of `500`.
+- **Prompt libraries** (`add-libraries-to-prompts-e9v6j9`): Prompts and
+  categories are now grouped into libraries. A `Default` library holds the
+  shipped catalog, cannot be renamed or deleted, and is the only place
+  `Restore defaults` reads or writes; any number of further libraries can be
+  created, renamed, and deleted (with their prompts, categories, and links,
+  behind a confirmation that states the counts). Each library has its own
+  category names, prompt order, and category order, and a prompt links only
+  to categories in its own library; moving content between libraries is not
+  supported. The Prompt Manager and the Prompt Picker show libraries as a
+  wrapping row of pills, remember their selections separately in the
+  browser, and scope lists, filters, `Recent`, and drag reorder to the
+  selected library. New REST endpoints `GET`, `POST`, `PATCH`, and `DELETE`
+  on `/api/prompt-libraries`; `POST /api/prompt-categories` and
+  `POST /api/prompts` require `libraryId`, and the list endpoints accept a
+  `libraryId` filter. Migration `0007_prompt_libraries.sql` rebuilds
+  `prompt_categories` and `prompts` with a `library_id` column. On upgrade
+  every existing prompt and category moves into a new `Custom` library with
+  its default key cleared (ids, links, order, notes, and usage counters are
+  kept), and `Default` is seeded from `api/models/default-prompts.ts` on the
+  next API start. Fresh installs also end up with `Custom` holding an
+  unkeyed copy of the catalog next to `Default`; delete it from its pill if
+  it is not wanted. The migration runner now keeps foreign keys off during a
+  run and verifies `PRAGMA foreign_key_check` after each applied file.
 
 ### 2026-09-27
 

@@ -223,4 +223,8 @@ The current schema contains:
 - `schema_migrations`
 
 `schema_migrations` is maintained by the runtime migration runner and records
-applied SQL files and checksums.
+applied SQL files and checksums. The runner keeps SQLite foreign keys off for
+the duration of a run, so a migration may rebuild a table (create, copy, drop,
+rename) without cascading deletes into rows that reference it, and it fails
+the run if `PRAGMA foreign_key_check` reports a violation after any applied
+file.

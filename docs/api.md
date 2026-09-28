@@ -951,8 +951,9 @@ Lists prompts ordered by `position`, then `name`. Each prompt includes its
 
 Creates a prompt in `libraryId`, which is required. An unknown library
 returns `404 not_found`. `categoryIds` is optional; an empty or missing list
-makes a root-level prompt, and every id must belong to the same library. `note` is the optional author's note: omit it or send
-`null` for no note; an empty string is rejected with `400 invalid_request`.
+makes a root-level prompt, and every id must belong to the same library.
+`note` is the optional author's note: omit it or send `null` for no note; an
+empty string is rejected with `400 invalid_request`.
 
 ```json
 {

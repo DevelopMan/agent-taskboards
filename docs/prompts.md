@@ -1,26 +1,78 @@
 # Prompt Library
 
 The prompt library stores reusable prompt texts that humans copy into coding
-agent sessions. It is managed in the UI under the sidebar `Prompts` entry and
-surfaced next to the task detail through the prompt picker.
+agent sessions. It is managed in the UI under the sidebar `Prompts` entry (the
+Prompt Manager) and surfaced next to the task detail through the prompt
+picker.
+
+## Libraries
+
+Prompts and categories live outside the project/board hierarchy: there are no
+per-project prompts, and every library is reachable from every task. They are
+grouped into prompt libraries. A prompt or category belongs to exactly one
+library, chosen when it is created and never changed afterwards; moving
+content between libraries is not supported.
+
+- The **Default** library, identified by `default_key = 'default'`, holds the
+  shipped catalog. It cannot be renamed or deleted, and no other library may
+  be named "Default" (compared trimmed and case-insensitively). Users may
+  still add their own prompts and categories to it.
+- Every other library has a free-form name: emoji allowed, trimmed, unique by
+  exact string. New libraries land at the end of the pills row. Libraries are
+  ordered by `position`, then `name`, with Default first; there is no library
+  reorder.
+- Deleting a library hard-deletes its categories, prompts, and links, after a
+  confirmation that states how many prompts and categories go with it.
+
+Each library owns its own categories, category names, and prompt order, so two
+libraries may both have a `Planning` category and a prompt can only link to
+categories in its own library.
+
+### Upgrading existing databases
+
+Migration `0007_prompt_libraries.sql` introduces libraries. It creates two
+rows, `Default` and `Custom`, and moves every prompt and category that
+exists at that moment into **Custom** with its `default_key` cleared. Ids,
+names, bodies, notes, positions, usage counters, metadata, and category links
+are kept, so links stay intact and prompt ids referenced elsewhere keep
+working. Default is created empty.
+
+On every API startup `PromptService.ensureDefaultLibrary()` fills Default from
+`api/models/default-prompts.ts` when it holds no prompts and no categories,
+so the catalog has one source of truth and is not repeated in SQL. After the
+first start on an upgraded database, Custom holds the prompts and categories
+the user had before, edits included, and Default holds a pristine catalog.
+
+The move applies to fresh installs too: their `0006` seed lands in Custom as
+an unkeyed copy of the catalog next to the pristine Default. Deleting Custom
+from its pill in the Prompt Manager is the way to drop that copy.
+
+The runner in `api/db/migrate.ts` keeps SQLite foreign keys off while a
+migration run is in progress and checks `PRAGMA foreign_key_check` after each
+applied file, because the table rebuild in `0007` would otherwise
+cascade-delete every prompt category link.
 
 ## Data Model
 
-Prompts and categories are global: they live outside the project/board
-hierarchy, and one library is shared across all projects.
-
-- `prompt_categories`: flat list of categories (no nesting). Names are unique
-  and may contain emoji. Categories carry a `position` for ordering and an
-  optional `default_key` marking seeded defaults.
-- `prompts`: prompt `name` (emoji allowed), `body`, an optional author `note`,
-  `position`, usage counters (`usage_count`, `last_used_at`), and an optional
-  `default_key`.
-- `prompt_category_links`: many-to-many links between prompts and categories.
-  A prompt with no links is "root level" (uncategorized).
+- `prompt_libraries`: `name` (unique), `position`, an optional `default_key`
+  (`'default'` marks the Default library), and `metadata`.
+- `prompt_categories`: flat list of categories (no nesting) inside a library
+  (`library_id`, cascade on library delete). Names are unique per library and
+  may contain emoji. Categories carry a per-library `position` for ordering
+  and an optional `default_key` marking seeded defaults.
+- `prompts`: `library_id` (cascade on library delete), prompt `name` (emoji
+  allowed), `body`, an optional author `note`, a per-library `position`,
+  usage counters (`usage_count`, `last_used_at`), and an optional
+  `default_key`. Default keys stay globally unique because only the Default
+  library carries them.
+- `prompt_category_links`: many-to-many links between prompts and categories
+  of the same library. A prompt with no links is "root level"
+  (uncategorized).
 
 Deletion is hard deletion behind a confirmation dialog; prompts are not
 archivable. Deleting a category removes only the category and its links —
-prompts survive and fall back to the root level.
+prompts survive and fall back to the root level of their library. Deleting a
+library removes everything in it.
 
 Prompts are not indexed into `search_documents`, so they do not appear in
 semantic search.
@@ -44,11 +96,12 @@ placeholder in the same spot.
 
 ## Ordering
 
-Prompts carry a single global order in `prompts.position`. A category view is
+Each library has one prompt order in `prompts.position`. A category view is
 only a projection of that order, so a prompt linked to two categories keeps
 the same relative order in both, and dragging it inside one category rewrites
-the one list. Categories have their own order in `prompt_categories.position`,
-which drives the library's left rail and the picker's groups.
+the one list. Categories have their own per-library order in
+`prompt_categories.position`, which drives the Prompt Manager's left rail and
+the picker's groups. A reorder never touches another library.
 
 `prompt_category_links.position` is unrelated to either: it orders the
 categories *within* a prompt, and reordering never touches it.
@@ -115,8 +168,8 @@ actionable.
 
 ## Default Prompts
 
-The `0006_prompt_library.sql` migration seeds three default categories and 14
-prompts, all keyed by stable `default_key` values:
+The shipped catalog in `api/models/default-prompts.ts` holds three categories
+and 14 prompts, all keyed by stable `default_key` values:
 
 - `Planning`
   - `expand-task` — ↔️ Expand Task
@@ -137,14 +190,35 @@ prompts, all keyed by stable `default_key` values:
   - `virtual-rebase-merge-conflicts-assistance` — 🔀🛠️ Virtual Rebase Merge
     Conflicts Assistance
 
-The seed values mirror `api/models/default-prompts.ts`, which also backs the
-`Restore defaults` action (`POST /api/prompts/restore-defaults`). Restore
-reconciles system-owned names, bodies, notes, order, categories, and links to
-this exact catalog, removes obsolete system defaults, and remains idempotent.
-User-created prompts and categories are preserved and ordered after system
-defaults. A same-named user row is adopted when its default key is missing,
-which upgrades databases created before that key was introduced without
-creating a duplicate.
+The catalog lives only in the Default library. It is written there by the
+startup seeding described under Libraries and by the `Restore defaults`
+action (`POST /api/prompts/restore-defaults`), which is available in the
+Prompt Manager while Default is selected. Restore reconciles system-owned
+names, bodies, notes, order, categories, and links inside Default to this
+exact catalog, removes obsolete system defaults, and remains idempotent.
+User-created prompts and categories in Default are preserved and ordered
+after the system defaults. A same-named user row in Default is adopted when
+its default key is missing, which upgrades databases created before that key
+was introduced without creating a duplicate. Other libraries are never read
+or written by a restore, so the Custom copy of the catalog is neither
+refreshed nor removed by it.
+
+Historically, `0006_prompt_library.sql` seeded the same catalog into the
+then single library. Since `0007` that seed lives on in Custom without
+default keys, as described under Libraries.
+
+## Prompt Manager
+
+The Prompt Manager opens from the sidebar `Prompts` entry. A wrapping row of
+library pills sits under its topbar; the selected pill scopes everything
+below it: the category rail and its counts, the prompt list, the editor's
+category checkboxes, drag reorder, and where new prompts and categories land.
+Libraries are created from the trailing `+` pill, renamed by double-click or
+F2 on their pill, and deleted from the `x` on their pill; the Default pill
+offers none of these. The selection is remembered in the browser under
+`taskboards.prompts.libraryId` and falls back to Default when the stored
+library no longer exists. `docs/ui.md` describes the chrome and the
+unsaved-changes rules in detail.
 
 ## Import and Export
 
