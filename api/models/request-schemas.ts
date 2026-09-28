@@ -162,15 +162,22 @@ const promptBodySchema = z
     message: "Body cannot be empty",
   });
 
+// Prompts and categories belong to exactly one library, chosen at creation.
+// The update schemas omit `libraryId` because rows never move between
+// libraries.
 export const promptCategoryCreateSchema = z.object({
+  libraryId: requiredString,
   name: requiredString,
   description: nullableString.optional(),
   metadata: jsonObjectSchema.optional(),
 });
 
-export const promptCategoryUpdateSchema = promptCategoryCreateSchema.partial();
+export const promptCategoryUpdateSchema = promptCategoryCreateSchema
+  .omit({ libraryId: true })
+  .partial();
 
 export const promptCreateSchema = z.object({
+  libraryId: requiredString,
   name: requiredString,
   body: promptBodySchema,
   note: nullableString.optional(),
@@ -178,9 +185,12 @@ export const promptCreateSchema = z.object({
   metadata: jsonObjectSchema.optional(),
 });
 
-export const promptUpdateSchema = promptCreateSchema.partial();
+export const promptUpdateSchema = promptCreateSchema
+  .omit({ libraryId: true })
+  .partial();
 
 export const promptListQuerySchema = z.object({
+  libraryId: requiredString.optional(),
   categoryId: requiredString.optional(),
   q: requiredString.optional(),
 });

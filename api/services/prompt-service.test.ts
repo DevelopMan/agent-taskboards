@@ -8,25 +8,35 @@ import { runMigrations } from "../db/migrate.js";
 import {
   promptCategories,
   promptCategoryLinks,
+  promptLibraries,
   prompts,
+  type PromptLibrary,
 } from "../db/schema.js";
 import { ApiError } from "../http/errors.js";
 import {
   defaultPromptCategories,
   defaultPrompts,
 } from "../models/default-prompts.js";
-import { PromptService } from "./prompt-service.js";
+import {
+  DEFAULT_PROMPT_LIBRARY_ID,
+  DEFAULT_PROMPT_LIBRARY_KEY,
+  PromptService,
+} from "./prompt-service.js";
 
-// Migration 0007_prompt_libraries moves every seeded row into the Custom
-// library with its default_key cleared and makes prompts.library_id and
-// prompt_categories.library_id NOT NULL. The tests marked `it.skip` below
-// exercise PromptService behavior that step 2 of the prompt libraries work,
-// "Prompt libraries 2/7" (task prompt-libraries-2-7-ffn2ln), rewires for
-// library scoping and Default seeding. Unskip and adjust them there.
+// 0007_prompt_libraries.sql leaves two libraries behind: an empty Default and
+// a Custom library holding the 0006 seed rows with their default keys cleared.
+// ensureDefaultLibrary() fills Default from default-prompts.ts, which is what
+// createApp() does on startup. Custom therefore doubles as the "other library"
+// that scoping and restore must leave alone.
+const CUSTOM_LIBRARY_ID = "prompt-library-custom";
+
 describe("PromptService", () => {
   let tmpDir: string;
   let client: DatabaseClient;
   let service: PromptService;
+  let defaultLibrary: PromptLibrary;
+  let customLibrary: PromptLibrary;
+  let firstEnsure: ReturnType<PromptService["ensureDefaultLibrary"]>;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "taskboards-prompts-"));
@@ -37,6 +47,9 @@ describe("PromptService", () => {
     });
     client = createDatabaseClient(databasePath);
     service = new PromptService(client);
+    firstEnsure = service.ensureDefaultLibrary();
+    defaultLibrary = firstEnsure.library;
+    customLibrary = service.getLibrary(CUSTOM_LIBRARY_ID);
   });
 
   afterEach(() => {
@@ -44,76 +57,468 @@ describe("PromptService", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  const promptIds = () => service.listPrompts().map(({ prompt }) => prompt.id);
+  const promptIds = (libraryId = defaultLibrary.id) =>
+    service.listPrompts({ libraryId }).map(({ prompt }) => prompt.id);
 
-  const expectContiguousPromptPositions = () => {
-    expect(
-      service.listPrompts().map(({ prompt }) => prompt.position),
-    ).toEqual(service.listPrompts().map((_, index) => index));
+  const categoryIds = (libraryId = defaultLibrary.id) =>
+    service.listCategories({ libraryId }).map((category) => category.id);
+
+  const expectContiguousPromptPositions = (libraryId = defaultLibrary.id) => {
+    const positions = service
+      .listPrompts({ libraryId })
+      .map(({ prompt }) => prompt.position);
+    expect(positions).toEqual(positions.map((_, index) => index));
   };
 
-  it.skip("seeds defaults from the migration that match default-prompts.ts", () => {
-    const categories = service.listCategories();
-    expect(categories.map((category) => category.defaultKey)).toEqual(
-      defaultPromptCategories.map((seed) => seed.defaultKey),
-    );
-    for (const seed of defaultPromptCategories) {
-      const category = categories.find(
-        (item) => item.defaultKey === seed.defaultKey,
-      );
-      expect(category?.name).toBe(seed.name);
-      expect(category?.description).toBe(seed.description);
-      expect(category?.position).toBe(seed.position);
+  const expectApiError = (
+    action: () => unknown,
+    status: number,
+    code: string,
+  ) => {
+    let caught: unknown;
+    try {
+      action();
+    } catch (error) {
+      caught = error;
     }
+    expect(caught).toBeInstanceOf(ApiError);
+    const apiError = caught as ApiError;
+    expect(apiError.status).toBe(status);
+    expect(apiError.code).toBe(code);
+  };
 
-    const seeded = service.listPrompts();
-    expect(seeded.map(({ prompt }) => prompt.defaultKey)).toEqual(
-      defaultPrompts.map((seed) => seed.defaultKey),
-    );
-    for (const seed of defaultPrompts) {
-      const match = seeded.find(
-        ({ prompt }) => prompt.defaultKey === seed.defaultKey,
-      );
-      expect(match?.prompt.name).toBe(seed.name);
-      expect(match?.prompt.body).toBe(seed.body);
-      expect(match?.prompt.position).toBe(seed.position);
-      expect(match?.prompt.usageCount).toBe(0);
-      expect(match?.prompt.note).toBe(seed.note);
-      const expectedCategoryIds = seed.categoryDefaultKeys.map(
-        (key) => categories.find((category) => category.defaultKey === key)!.id,
-      );
-      expect(match?.categoryIds).toEqual(expectedCategoryIds);
-    }
+  // Everything in a library, in a shape that survives a deep-equal after
+  // another library was changed.
+  const snapshotLibrary = (libraryId: string) => ({
+    categories: service.listCategories({ libraryId }),
+    prompts: service.listPrompts({ libraryId }),
   });
 
-  it.skip("creates, updates, and rejects duplicate categories", () => {
-    const category = service.createCategory({ name: "🚀 Release" });
-    expect(category.position).toBeGreaterThan(0);
+  const inDefault = <T extends object>(input: T) => ({
+    libraryId: defaultLibrary.id,
+    ...input,
+  });
 
-    expect(() => service.createCategory({ name: "🚀 Release" })).toThrowError(
-      ApiError,
-    );
+  describe("Default library seeding", () => {
+    it("seeds the Default library on first ensure and is idempotent", () => {
+      expect(firstEnsure.seeded).toBe(true);
+      expect(defaultLibrary).toMatchObject({
+        id: DEFAULT_PROMPT_LIBRARY_ID,
+        name: "Default",
+        position: 0,
+        defaultKey: DEFAULT_PROMPT_LIBRARY_KEY,
+      });
+
+      const categories = service.listCategories({ libraryId: defaultLibrary.id });
+      expect(categories.map((category) => category.defaultKey)).toEqual(
+        defaultPromptCategories.map((seed) => seed.defaultKey),
+      );
+      for (const seed of defaultPromptCategories) {
+        const category = categories.find(
+          (item) => item.defaultKey === seed.defaultKey,
+        );
+        expect(category).toMatchObject({
+          libraryId: defaultLibrary.id,
+          name: seed.name,
+          description: seed.description,
+          position: seed.position,
+        });
+      }
+
+      const seeded = service.listPrompts({ libraryId: defaultLibrary.id });
+      expect(seeded.map(({ prompt }) => prompt.defaultKey)).toEqual(
+        defaultPrompts.map((seed) => seed.defaultKey),
+      );
+      for (const seed of defaultPrompts) {
+        const match = seeded.find(
+          ({ prompt }) => prompt.defaultKey === seed.defaultKey,
+        );
+        expect(match?.prompt).toMatchObject({
+          libraryId: defaultLibrary.id,
+          name: seed.name,
+          body: seed.body,
+          note: seed.note,
+          position: seed.position,
+          usageCount: 0,
+        });
+        expect(match?.categoryIds).toEqual(
+          seed.categoryDefaultKeys.map(
+            (key) => categories.find((category) => category.defaultKey === key)!.id,
+          ),
+        );
+      }
+
+      const before = snapshotLibrary(defaultLibrary.id);
+      const again = service.ensureDefaultLibrary();
+      expect(again.seeded).toBe(false);
+      expect(again.library).toEqual(defaultLibrary);
+      expect(snapshotLibrary(defaultLibrary.id)).toEqual(before);
+    });
+
+    it("leaves a non-empty Default library alone and reseeds an emptied one", () => {
+      const [firstPromptId] = promptIds();
+      service.deletePrompt(firstPromptId);
+
+      expect(service.ensureDefaultLibrary().seeded).toBe(false);
+      expect(promptIds()).not.toContain(firstPromptId);
+      expect(promptIds()).toHaveLength(defaultPrompts.length - 1);
+
+      for (const id of promptIds()) {
+        service.deletePrompt(id);
+      }
+      for (const id of categoryIds()) {
+        service.deleteCategory(id);
+      }
+      expect(service.ensureDefaultLibrary().seeded).toBe(true);
+      expect(promptIds()).toHaveLength(defaultPrompts.length);
+      expect(categoryIds()).toHaveLength(defaultPromptCategories.length);
+    });
+
+    it("never touches the Custom library while seeding", () => {
+      const custom = snapshotLibrary(customLibrary.id);
+      expect(custom.prompts.length).toBeGreaterThan(0);
+      expect(custom.prompts.every(({ prompt }) => prompt.defaultKey === null)).toBe(
+        true,
+      );
+      expect(custom.categories.every((category) => category.defaultKey === null)).toBe(
+        true,
+      );
+
+      service.ensureDefaultLibrary();
+
+      expect(snapshotLibrary(customLibrary.id)).toEqual(custom);
+    });
+
+    it("recreates a missing Default library row before seeding", () => {
+      client.db
+        .delete(promptLibraries)
+        .where(eq(promptLibraries.id, defaultLibrary.id))
+        .run();
+      expectApiError(() => service.getDefaultLibrary(), 500, "internal_error");
+
+      const ensured = service.ensureDefaultLibrary();
+
+      expect(ensured.seeded).toBe(true);
+      expect(ensured.library).toMatchObject({
+        id: DEFAULT_PROMPT_LIBRARY_ID,
+        name: "Default",
+        defaultKey: DEFAULT_PROMPT_LIBRARY_KEY,
+      });
+      expect(service.getDefaultLibrary().id).toBe(DEFAULT_PROMPT_LIBRARY_ID);
+      expect(promptIds()).toHaveLength(defaultPrompts.length);
+    });
+  });
+
+  describe("libraries", () => {
+    it("lists libraries by position then name and appends new ones", () => {
+      expect(service.listLibraries().map((library) => library.name)).toEqual([
+        "Default",
+        "Custom",
+      ]);
+
+      const work = service.createLibrary({ name: "Work" });
+      const experiments = service.createLibrary({ name: "  🧪 Experiments  " });
+
+      expect(work).toMatchObject({ name: "Work", position: 2, defaultKey: null });
+      expect(experiments).toMatchObject({ name: "🧪 Experiments", position: 3 });
+      expect(service.listLibraries().map((library) => library.id)).toEqual([
+        defaultLibrary.id,
+        customLibrary.id,
+        work.id,
+        experiments.id,
+      ]);
+
+      client.db
+        .update(promptLibraries)
+        .set({ position: work.position })
+        .where(eq(promptLibraries.id, experiments.id))
+        .run();
+      expect(service.listLibraries().map((library) => library.name)).toEqual([
+        "Default",
+        "Custom",
+        "Work",
+        "🧪 Experiments",
+      ]);
+    });
+
+    it("enforces unique, non-empty names and reserves Default", () => {
+      expectApiError(
+        () => service.createLibrary({ name: "Custom" }),
+        409,
+        "invalid_state",
+      );
+      for (const reserved of ["Default", "default", "  DEFAULT "]) {
+        expectApiError(
+          () => service.createLibrary({ name: reserved }),
+          400,
+          "invalid_request",
+        );
+      }
+      expectApiError(
+        () => service.createLibrary({ name: "   " }),
+        400,
+        "invalid_request",
+      );
+
+      const mine = service.createLibrary({ name: "Mine" });
+      expect(service.renameLibrary(customLibrary.id, "  Custom  ").name).toBe(
+        "Custom",
+      );
+      expectApiError(
+        () => service.renameLibrary(customLibrary.id, "Mine"),
+        409,
+        "invalid_state",
+      );
+      expectApiError(
+        () => service.renameLibrary(customLibrary.id, "default"),
+        400,
+        "invalid_request",
+      );
+      expect(service.renameLibrary(mine.id, "Ours").name).toBe("Ours");
+      expect(service.getLibrary(mine.id).name).toBe("Ours");
+    });
+
+    it("refuses to rename or delete the Default library", () => {
+      expectApiError(
+        () => service.renameLibrary(defaultLibrary.id, "Mine"),
+        400,
+        "invalid_request",
+      );
+      expectApiError(
+        () => service.deleteLibrary(defaultLibrary.id),
+        400,
+        "invalid_request",
+      );
+      expect(service.getDefaultLibrary()).toEqual(defaultLibrary);
+    });
+
+    it("returns 404 for unknown library ids everywhere they are accepted", () => {
+      expectApiError(() => service.getLibrary("missing"), 404, "not_found");
+      expectApiError(
+        () => service.renameLibrary("missing", "X"),
+        404,
+        "not_found",
+      );
+      expectApiError(() => service.deleteLibrary("missing"), 404, "not_found");
+      expectApiError(
+        () => service.createCategory({ libraryId: "missing", name: "X" }),
+        404,
+        "not_found",
+      );
+      expectApiError(
+        () => service.createPrompt({ libraryId: "missing", name: "X", body: "x" }),
+        404,
+        "not_found",
+      );
+      expectApiError(
+        () => service.listPrompts({ libraryId: "missing" }),
+        404,
+        "not_found",
+      );
+      expectApiError(
+        () => service.listCategories({ libraryId: "missing" }),
+        404,
+        "not_found",
+      );
+    });
+
+    it("deletes a library with its categories, prompts, and links and reports counts", () => {
+      const temp = service.createLibrary({ name: "Temp" });
+      const categoryA = service.createCategory({ libraryId: temp.id, name: "A" });
+      const categoryB = service.createCategory({ libraryId: temp.id, name: "B" });
+      const linked = service.createPrompt({
+        libraryId: temp.id,
+        name: "Linked",
+        body: "body",
+        categoryIds: [categoryA.id, categoryB.id],
+      });
+      service.createPrompt({ libraryId: temp.id, name: "Root", body: "body" });
+      service.createPrompt({ libraryId: temp.id, name: "Other", body: "body" });
+      const defaultBefore = snapshotLibrary(defaultLibrary.id);
+
+      const result = service.deleteLibrary(temp.id);
+
+      expect(result.library).toEqual(temp);
+      expect(result.deleted).toEqual({ prompts: 3, categories: 2 });
+      expectApiError(() => service.getLibrary(temp.id), 404, "not_found");
+      expectApiError(() => service.getPrompt(linked.prompt.id), 404, "not_found");
+      expectApiError(() => service.getCategory(categoryA.id), 404, "not_found");
+      expect(
+        client.db
+          .select()
+          .from(promptCategoryLinks)
+          .where(eq(promptCategoryLinks.promptId, linked.prompt.id))
+          .all(),
+      ).toEqual([]);
+      expect(snapshotLibrary(defaultLibrary.id)).toEqual(defaultBefore);
+    });
+  });
+
+  describe("library scoping", () => {
+    it("scopes category names, positions, and prompt positions per library", () => {
+      const inDefaultLibrary = service.createCategory(
+        inDefault({ name: "Review" }),
+      );
+      const inCustomLibrary = service.createCategory({
+        libraryId: customLibrary.id,
+        name: "Review",
+      });
+      expect(inDefaultLibrary.position).toBe(defaultPromptCategories.length);
+      expect(inCustomLibrary.position).toBe(
+        service.listCategories({ libraryId: customLibrary.id }).length - 1,
+      );
+      expectApiError(
+        () => service.createCategory(inDefault({ name: "Review" })),
+        409,
+        "invalid_state",
+      );
+      // Renaming onto a name that only exists in another library is fine.
+      service.createCategory(inDefault({ name: "Only in Default" }));
+      expect(
+        service.updateCategory(inCustomLibrary.id, { name: "Only in Default" })
+          .name,
+      ).toBe("Only in Default");
+      expectApiError(
+        () =>
+          service.updateCategory(inDefaultLibrary.id, {
+            name: "Only in Default",
+          }),
+        409,
+        "invalid_state",
+      );
+
+      const customPromptCount = promptIds(customLibrary.id).length;
+      const defaultPrompt = service.createPrompt(
+        inDefault({ name: "New", body: "body" }),
+      ).prompt;
+      const customPrompt = service.createPrompt({
+        libraryId: customLibrary.id,
+        name: "New",
+        body: "body",
+      }).prompt;
+      expect(defaultPrompt.position).toBe(defaultPrompts.length);
+      expect(customPrompt.position).toBe(customPromptCount);
+      expect(defaultPrompt.libraryId).toBe(defaultLibrary.id);
+      expect(customPrompt.libraryId).toBe(customLibrary.id);
+    });
+
+    it("filters lists by library and returns every library when unfiltered", () => {
+      const customCount = promptIds(customLibrary.id).length;
+      expect(customCount).toBeGreaterThan(0);
+      expect(promptIds()).toHaveLength(defaultPrompts.length);
+      expect(service.listPrompts()).toHaveLength(
+        defaultPrompts.length + customCount,
+      );
+      expect(
+        service
+          .listPrompts({ libraryId: customLibrary.id })
+          .every(({ prompt }) => prompt.libraryId === customLibrary.id),
+      ).toBe(true);
+      expect(service.listCategories()).toHaveLength(
+        categoryIds().length + categoryIds(customLibrary.id).length,
+      );
+
+      // A category filter from another library yields nothing rather than
+      // leaking rows across the boundary.
+      const [customCategoryId] = categoryIds(customLibrary.id);
+      expect(
+        service.listPrompts({
+          libraryId: defaultLibrary.id,
+          categoryId: customCategoryId,
+        }),
+      ).toEqual([]);
+    });
+
+    it("reorders prompts and categories within their own library only", () => {
+      const defaultOrder = promptIds();
+      const customOrder = promptIds(customLibrary.id);
+      const defaultCategoryOrder = categoryIds();
+
+      service.reorderPrompt(customOrder[customOrder.length - 1], 0);
+      expect(promptIds(customLibrary.id)).toEqual([
+        customOrder[customOrder.length - 1],
+        ...customOrder.slice(0, -1),
+      ]);
+      expectContiguousPromptPositions(customLibrary.id);
+      expect(promptIds()).toEqual(defaultOrder);
+
+      const customCategories = categoryIds(customLibrary.id);
+      service.reorderCategory(customCategories[customCategories.length - 1], 0);
+      expect(categoryIds(customLibrary.id)).toEqual([
+        customCategories[customCategories.length - 1],
+        ...customCategories.slice(0, -1),
+      ]);
+      expect(categoryIds()).toEqual(defaultCategoryOrder);
+    });
+
+    it("rejects links to categories of another library", () => {
+      const customCategory = service.createCategory({
+        libraryId: customLibrary.id,
+        name: "Elsewhere",
+      });
+
+      expectApiError(
+        () =>
+          service.createPrompt(
+            inDefault({
+              name: "Cross",
+              body: "body",
+              categoryIds: [customCategory.id],
+            }),
+          ),
+        400,
+        "invalid_request",
+      );
+
+      const prompt = service.createPrompt(
+        inDefault({ name: "Stays", body: "body" }),
+      );
+      expectApiError(
+        () =>
+          service.updatePrompt(prompt.prompt.id, {
+            categoryIds: [customCategory.id],
+          }),
+        400,
+        "invalid_request",
+      );
+      expect(service.getPrompt(prompt.prompt.id).categoryIds).toEqual([]);
+      expect(service.getPrompt(prompt.prompt.id).prompt.libraryId).toBe(
+        defaultLibrary.id,
+      );
+    });
+  });
+
+  it("creates, updates, and rejects duplicate categories", () => {
+    const category = service.createCategory(inDefault({ name: "🚀 Release" }));
+    expect(category.position).toBeGreaterThan(0);
+    expect(category.libraryId).toBe(defaultLibrary.id);
+
+    expect(() =>
+      service.createCategory(inDefault({ name: "🚀 Release" })),
+    ).toThrowError(ApiError);
 
     const updated = service.updateCategory(category.id, {
       description: "Release prompts",
     });
     expect(updated.description).toBe("Release prompts");
+    expect(updated.libraryId).toBe(defaultLibrary.id);
     expect(() =>
       service.updateCategory(category.id, { name: "Planning" }),
     ).toThrowError(ApiError);
   });
 
-  it.skip("creates prompts with and without categories and lists by filters", () => {
-    const category = service.createCategory({ name: "Review" });
-    const inCategory = service.createPrompt({
-      name: "Review checklist",
-      body: "Check {{TASK}} carefully.",
-      categoryIds: [category.id],
-    });
-    const rootLevel = service.createPrompt({
-      name: "Root prompt",
-      body: "No category here.",
-    });
+  it("creates prompts with and without categories and lists by filters", () => {
+    const category = service.createCategory(inDefault({ name: "Review" }));
+    const inCategory = service.createPrompt(
+      inDefault({
+        name: "Review checklist",
+        body: "Check {{TASK}} carefully.",
+        categoryIds: [category.id],
+      }),
+    );
+    const rootLevel = service.createPrompt(
+      inDefault({ name: "Root prompt", body: "No category here." }),
+    );
 
     expect(inCategory.categoryIds).toEqual([category.id]);
     expect(rootLevel.categoryIds).toEqual([]);
@@ -129,23 +534,29 @@ describe("PromptService", () => {
     ]);
 
     expect(() =>
-      service.createPrompt({
-        name: "Broken",
-        body: "x",
-        categoryIds: ["missing-category"],
-      }),
+      service.createPrompt(
+        inDefault({
+          name: "Broken",
+          body: "x",
+          categoryIds: ["missing-category"],
+        }),
+      ),
     ).toThrowError(ApiError);
   });
 
-  it.skip("stores, updates, and clears an author note", () => {
-    const created = service.createPrompt({
-      name: "Noted",
-      body: "body",
-      note: "Use this before opening a PR.",
-    });
+  it("stores, updates, and clears an author note", () => {
+    const created = service.createPrompt(
+      inDefault({
+        name: "Noted",
+        body: "body",
+        note: "Use this before opening a PR.",
+      }),
+    );
     expect(created.prompt.note).toBe("Use this before opening a PR.");
 
-    const withoutNote = service.createPrompt({ name: "Plain", body: "body" });
+    const withoutNote = service.createPrompt(
+      inDefault({ name: "Plain", body: "body" }),
+    );
     expect(withoutNote.prompt.note).toBeNull();
 
     const updated = service.updatePrompt(created.prompt.id, {
@@ -158,14 +569,12 @@ describe("PromptService", () => {
     expect(cleared.prompt.note).toBeNull();
   });
 
-  it.skip("replaces the category link set only when categoryIds is supplied", () => {
-    const categoryA = service.createCategory({ name: "A" });
-    const categoryB = service.createCategory({ name: "B" });
-    const created = service.createPrompt({
-      name: "Multi",
-      body: "body",
-      categoryIds: [categoryA.id],
-    });
+  it("replaces the category link set only when categoryIds is supplied", () => {
+    const categoryA = service.createCategory(inDefault({ name: "A" }));
+    const categoryB = service.createCategory(inDefault({ name: "B" }));
+    const created = service.createPrompt(
+      inDefault({ name: "Multi", body: "body", categoryIds: [categoryA.id] }),
+    );
 
     const renamed = service.updatePrompt(created.prompt.id, {
       name: "Multi renamed",
@@ -184,13 +593,11 @@ describe("PromptService", () => {
     expect(cleared.categoryIds).toEqual([]);
   });
 
-  it.skip("keeps prompts when their category is deleted", () => {
-    const category = service.createCategory({ name: "Ephemeral" });
-    const created = service.createPrompt({
-      name: "Survivor",
-      body: "body",
-      categoryIds: [category.id],
-    });
+  it("keeps prompts when their category is deleted", () => {
+    const category = service.createCategory(inDefault({ name: "Ephemeral" }));
+    const created = service.createPrompt(
+      inDefault({ name: "Survivor", body: "body", categoryIds: [category.id] }),
+    );
 
     service.deleteCategory(category.id);
 
@@ -203,13 +610,11 @@ describe("PromptService", () => {
     ).toEqual([]);
   });
 
-  it.skip("hard-deletes prompts and cascades their links", () => {
-    const category = service.createCategory({ name: "Holder" });
-    const created = service.createPrompt({
-      name: "Doomed",
-      body: "body",
-      categoryIds: [category.id],
-    });
+  it("hard-deletes prompts and cascades their links", () => {
+    const category = service.createCategory(inDefault({ name: "Holder" }));
+    const created = service.createPrompt(
+      inDefault({ name: "Doomed", body: "body", categoryIds: [category.id] }),
+    );
 
     service.deletePrompt(created.prompt.id);
 
@@ -223,8 +628,8 @@ describe("PromptService", () => {
     ).toEqual([]);
   });
 
-  it.skip("records prompt usage", () => {
-    const created = service.createPrompt({ name: "Used", body: "body" });
+  it("records prompt usage", () => {
+    const created = service.createPrompt(inDefault({ name: "Used", body: "body" }));
     expect(created.prompt.usageCount).toBe(0);
     expect(created.prompt.lastUsedAt).toBeNull();
 
@@ -236,9 +641,12 @@ describe("PromptService", () => {
     expect(twice.prompt.lastUsedAt).toBeInstanceOf(Date);
   });
 
-  it.skip("reorders a prompt within the single global order", () => {
-    const first = service.createPrompt({ name: "First", body: "body" }).prompt;
-    const second = service.createPrompt({ name: "Second", body: "body" }).prompt;
+  it("reorders a prompt within its library's single order", () => {
+    const first = service.createPrompt(inDefault({ name: "First", body: "body" }))
+      .prompt;
+    const second = service.createPrompt(
+      inDefault({ name: "Second", body: "body" }),
+    ).prompt;
     const seeded = promptIds().filter(
       (id) => id !== first.id && id !== second.id,
     );
@@ -280,8 +688,10 @@ describe("PromptService", () => {
     expectContiguousPromptPositions();
   });
 
-  it.skip("leaves usage counters untouched when reordering", () => {
-    const created = service.createPrompt({ name: "Unused", body: "body" }).prompt;
+  it("leaves usage counters untouched when reordering", () => {
+    const created = service.createPrompt(
+      inDefault({ name: "Unused", body: "body" }),
+    ).prompt;
     service.recordPromptUse(created.id);
     const before = service.getPrompt(created.id).prompt;
 
@@ -291,22 +701,18 @@ describe("PromptService", () => {
     expect(after.lastUsedAt).toEqual(before.lastUsedAt);
   });
 
-  it.skip("reorders categories independently of prompts", () => {
-    const category = service.createCategory({ name: "🚀 Release" });
-    const seeded = service
-      .listCategories()
-      .filter((item) => item.id !== category.id)
-      .map((item) => item.id);
+  it("reorders categories independently of prompts", () => {
+    const category = service.createCategory(inDefault({ name: "🚀 Release" }));
+    const seeded = categoryIds().filter((id) => id !== category.id);
     const promptOrderBefore = promptIds();
 
     service.reorderCategory(category.id, 0);
 
-    expect(service.listCategories().map((item) => item.id)).toEqual([
-      category.id,
-      ...seeded,
-    ]);
+    expect(categoryIds()).toEqual([category.id, ...seeded]);
     expect(
-      service.listCategories().map((item) => item.position),
+      service
+        .listCategories({ libraryId: defaultLibrary.id })
+        .map((item) => item.position),
     ).toEqual([0, ...seeded.map((_, index) => index + 1)]);
     expect(promptIds()).toEqual(promptOrderBefore);
   });
@@ -320,188 +726,262 @@ describe("PromptService", () => {
     );
   });
 
-  it.skip("restores deleted defaults idempotently", () => {
-    const noop = service.restoreDefaults();
-    expect(noop.restored).toEqual([]);
-
-    const seeded = service.listPrompts();
-    const target = seeded.find(
-      ({ prompt }) => prompt.defaultKey === "umbrella-implement",
-    )!;
-    service.deletePrompt(target.prompt.id);
-
-    const restored = service.restoreDefaults();
-    expect(restored.restored).toEqual(["prompt:umbrella-implement"]);
-
-    const after = service
-      .listPrompts()
-      .find(({ prompt }) => prompt.defaultKey === "umbrella-implement");
-    const seedBody = defaultPrompts.find(
-      (seed) => seed.defaultKey === "umbrella-implement",
-    )!.body;
-    expect(after?.prompt.body).toBe(seedBody);
-    expect(after?.categoryIds).toHaveLength(1);
-
-    expect(service.restoreDefaults().restored).toEqual([]);
-  });
-
-  it.skip("reconciles edited defaults while preserving custom rows", () => {
-    const customCategory = service.createCategory({ name: "Custom category" });
-    const customPrompt = service.createPrompt({
-      name: "Custom prompt",
-      body: "Keep me",
-      note: "Keep this note",
-      categoryIds: [customCategory.id],
-    });
-    const targetSeed = defaultPrompts.find(
-      (seed) => seed.defaultKey === "umbrella-implement",
-    )!;
-    const target = service
-      .listPrompts()
-      .find(({ prompt }) => prompt.defaultKey === targetSeed.defaultKey)!;
-    const used = service.recordPromptUse(target.prompt.id).prompt;
-    service.updatePrompt(target.prompt.id, {
-      name: "Edited default",
-      body: "Edited body",
-      note: "Edited note",
-      categoryIds: [customCategory.id],
-    });
-    service.reorderPrompt(target.prompt.id, defaultPrompts.length - 1);
-
-    const restored = service.restoreDefaults();
-
-    expect(restored.restored).toEqual(
-      defaultPrompts.slice(1).map((seed) => `prompt:${seed.defaultKey}`),
-    );
-    const reconciled = service.getPrompt(target.prompt.id);
-    expect(reconciled.prompt.name).toBe(targetSeed.name);
-    expect(reconciled.prompt.body).toBe(targetSeed.body);
-    expect(reconciled.prompt.note).toBe(targetSeed.note);
-    expect(reconciled.prompt.position).toBe(targetSeed.position);
-    expect(reconciled.prompt.usageCount).toBe(1);
-    expect(reconciled.prompt.lastUsedAt).toEqual(used.lastUsedAt);
-    expect(
-      reconciled.categoryIds.map(
-        (categoryId) => service.getCategory(categoryId).defaultKey,
-      ),
-    ).toEqual(targetSeed.categoryDefaultKeys);
-    expect(service.getPrompt(customPrompt.prompt.id).prompt).toMatchObject({
-      name: "Custom prompt",
-      body: "Keep me",
-      note: "Keep this note",
-      position: defaultPrompts.length,
-      defaultKey: null,
-    });
-    expect(service.getPrompt(customPrompt.prompt.id).categoryIds).toEqual([
-      customCategory.id,
-    ]);
-    expect(service.restoreDefaults().restored).toEqual([]);
-  });
-
-  it.skip("recreates deleted default categories and exact prompt links", () => {
-    const implementing = service
-      .listCategories()
-      .find((category) => category.defaultKey === "implementing")!;
-    service.deleteCategory(implementing.id);
-
-    const restored = service.restoreDefaults();
-    expect(restored.restored[0]).toBe("category:implementing");
-
-    const recreated = service
-      .listCategories()
-      .find((category) => category.defaultKey === "implementing")!;
-    expect(recreated.id).not.toBe(implementing.id);
-    for (const seed of defaultPrompts) {
-      const prompt = service
-        .listPrompts()
-        .find((item) => item.prompt.defaultKey === seed.defaultKey)!;
+  describe("restoreDefaults", () => {
+    it("restores deleted defaults idempotently and reports the Default library", () => {
+      const noop = service.restoreDefaults();
+      expect(noop.restored).toEqual([]);
+      expect(noop.library).toEqual(defaultLibrary);
+      expect(noop.prompts.every(({ prompt }) => prompt.libraryId === defaultLibrary.id)).toBe(
+        true,
+      );
       expect(
-        prompt.categoryIds.map(
+        noop.categories.every((category) => category.libraryId === defaultLibrary.id),
+      ).toBe(true);
+      expect(noop.prompts).toHaveLength(defaultPrompts.length);
+
+      const target = service
+        .listPrompts({ libraryId: defaultLibrary.id })
+        .find(({ prompt }) => prompt.defaultKey === "umbrella-implement")!;
+      service.deletePrompt(target.prompt.id);
+
+      const restored = service.restoreDefaults();
+      expect(restored.restored).toEqual(["prompt:umbrella-implement"]);
+
+      const after = service
+        .listPrompts({ libraryId: defaultLibrary.id })
+        .find(({ prompt }) => prompt.defaultKey === "umbrella-implement");
+      const seedBody = defaultPrompts.find(
+        (seed) => seed.defaultKey === "umbrella-implement",
+      )!.body;
+      expect(after?.prompt.body).toBe(seedBody);
+      expect(after?.categoryIds).toHaveLength(1);
+
+      expect(service.restoreDefaults().restored).toEqual([]);
+    });
+
+    it("reconciles edited defaults while preserving custom rows in Default", () => {
+      const customCategory = service.createCategory(
+        inDefault({ name: "Custom category" }),
+      );
+      const customPrompt = service.createPrompt(
+        inDefault({
+          name: "Custom prompt",
+          body: "Keep me",
+          note: "Keep this note",
+          categoryIds: [customCategory.id],
+        }),
+      );
+      const targetSeed = defaultPrompts.find(
+        (seed) => seed.defaultKey === "umbrella-implement",
+      )!;
+      const target = service
+        .listPrompts({ libraryId: defaultLibrary.id })
+        .find(({ prompt }) => prompt.defaultKey === targetSeed.defaultKey)!;
+      const used = service.recordPromptUse(target.prompt.id).prompt;
+      service.updatePrompt(target.prompt.id, {
+        name: "Edited default",
+        body: "Edited body",
+        note: "Edited note",
+        categoryIds: [customCategory.id],
+      });
+      service.reorderPrompt(target.prompt.id, defaultPrompts.length - 1);
+
+      const restored = service.restoreDefaults();
+
+      expect(restored.restored).toEqual(
+        defaultPrompts.slice(1).map((seed) => `prompt:${seed.defaultKey}`),
+      );
+      const reconciled = service.getPrompt(target.prompt.id);
+      expect(reconciled.prompt.name).toBe(targetSeed.name);
+      expect(reconciled.prompt.body).toBe(targetSeed.body);
+      expect(reconciled.prompt.note).toBe(targetSeed.note);
+      expect(reconciled.prompt.position).toBe(targetSeed.position);
+      expect(reconciled.prompt.usageCount).toBe(1);
+      expect(reconciled.prompt.lastUsedAt).toEqual(used.lastUsedAt);
+      expect(
+        reconciled.categoryIds.map(
           (categoryId) => service.getCategory(categoryId).defaultKey,
         ),
-      ).toEqual(seed.categoryDefaultKeys);
-    }
-
-    expect(service.restoreDefaults().restored).toEqual([]);
-  });
-
-  it.skip("adopts same-named rows created before their default keys existed", () => {
-    const planning = service
-      .listCategories()
-      .find((category) => category.defaultKey === "planning")!;
-    const seed = defaultPrompts.find(
-      (candidate) => candidate.defaultKey === "expand-task",
-    )!;
-    const seededPrompt = service
-      .listPrompts()
-      .find(({ prompt }) => prompt.defaultKey === seed.defaultKey)!;
-    service.deletePrompt(seededPrompt.prompt.id);
-    service.deleteCategory(planning.id);
-    const category = service.createCategory({ name: "Planning" });
-    const prompt = service.createPrompt({
-      name: seed.name,
-      body: seed.body,
-      note: seed.note,
-      categoryIds: [category.id],
+      ).toEqual(targetSeed.categoryDefaultKeys);
+      expect(service.getPrompt(customPrompt.prompt.id).prompt).toMatchObject({
+        name: "Custom prompt",
+        body: "Keep me",
+        note: "Keep this note",
+        position: defaultPrompts.length,
+        defaultKey: null,
+        libraryId: defaultLibrary.id,
+      });
+      expect(service.getPrompt(customPrompt.prompt.id).categoryIds).toEqual([
+        customCategory.id,
+      ]);
+      expect(service.restoreDefaults().restored).toEqual([]);
     });
 
-    const restored = service.restoreDefaults();
-    expect(restored.restored).toEqual([
-      "category:planning",
-      "prompt:expand-task",
-      "prompt:create-scoped-tasks",
-    ]);
-    expect(service.getCategory(category.id).defaultKey).toBe("planning");
-    expect(service.getPrompt(prompt.prompt.id).prompt.defaultKey).toBe(
-      "expand-task",
-    );
-    expect(
-      service
-        .listPrompts()
-        .filter(({ prompt: item }) => item.name === seed.name),
-    ).toHaveLength(1);
-  });
+    it("recreates deleted default categories and exact prompt links", () => {
+      const implementing = service
+        .listCategories({ libraryId: defaultLibrary.id })
+        .find((category) => category.defaultKey === "implementing")!;
+      service.deleteCategory(implementing.id);
 
-  it.skip("removes obsolete system defaults but preserves custom rows", () => {
-    const custom = service.createPrompt({ name: "Mine", body: "body" });
-    client.db
-      .insert(prompts)
-      // @ts-expect-error libraryId is required since 0007_prompt_libraries; see the describe comment.
-      .values({
-        name: "Obsolete default",
-        body: "old",
-        position: 99,
-        defaultKey: "obsolete-default",
-      })
-      .run();
-    client.db
-      .insert(promptCategories)
-      // @ts-expect-error libraryId is required since 0007_prompt_libraries; see the describe comment.
-      .values({
-        name: "Obsolete category",
-        position: 99,
-        defaultKey: "obsolete-category",
-      })
-      .run();
+      const restored = service.restoreDefaults();
+      expect(restored.restored[0]).toBe("category:implementing");
 
-    const restored = service.restoreDefaults();
+      const recreated = service
+        .listCategories({ libraryId: defaultLibrary.id })
+        .find((category) => category.defaultKey === "implementing")!;
+      expect(recreated.id).not.toBe(implementing.id);
+      expect(recreated.libraryId).toBe(defaultLibrary.id);
+      for (const seed of defaultPrompts) {
+        const prompt = service
+          .listPrompts({ libraryId: defaultLibrary.id })
+          .find((item) => item.prompt.defaultKey === seed.defaultKey)!;
+        expect(
+          prompt.categoryIds.map(
+            (categoryId) => service.getCategory(categoryId).defaultKey,
+          ),
+        ).toEqual(seed.categoryDefaultKeys);
+      }
 
-    expect(restored.restored).toEqual([
-      "removed:prompt:obsolete-default",
-      "removed:category:obsolete-category",
-    ]);
-    expect(
-      service.listPrompts().some(
-        ({ prompt }) => prompt.defaultKey === "obsolete-default",
-      ),
-    ).toBe(false);
-    expect(
-      service
-        .listCategories()
-        .some((category) => category.defaultKey === "obsolete-category"),
-    ).toBe(false);
-    expect(service.getPrompt(custom.prompt.id).prompt.position).toBe(
-      defaultPrompts.length,
-    );
+      expect(service.restoreDefaults().restored).toEqual([]);
+    });
+
+    it("adopts same-named rows created before their default keys existed", () => {
+      const planning = service
+        .listCategories({ libraryId: defaultLibrary.id })
+        .find((category) => category.defaultKey === "planning")!;
+      const seed = defaultPrompts.find(
+        (candidate) => candidate.defaultKey === "expand-task",
+      )!;
+      const seededPrompt = service
+        .listPrompts({ libraryId: defaultLibrary.id })
+        .find(({ prompt }) => prompt.defaultKey === seed.defaultKey)!;
+      service.deletePrompt(seededPrompt.prompt.id);
+      service.deleteCategory(planning.id);
+      const category = service.createCategory(inDefault({ name: "Planning" }));
+      const prompt = service.createPrompt(
+        inDefault({
+          name: seed.name,
+          body: seed.body,
+          note: seed.note,
+          categoryIds: [category.id],
+        }),
+      );
+
+      const restored = service.restoreDefaults();
+      expect(restored.restored).toEqual([
+        "category:planning",
+        "prompt:expand-task",
+        "prompt:create-scoped-tasks",
+      ]);
+      expect(service.getCategory(category.id).defaultKey).toBe("planning");
+      expect(service.getPrompt(prompt.prompt.id).prompt.defaultKey).toBe(
+        "expand-task",
+      );
+      expect(
+        service
+          .listPrompts({ libraryId: defaultLibrary.id })
+          .filter(({ prompt: item }) => item.name === seed.name),
+      ).toHaveLength(1);
+    });
+
+    it("removes obsolete system defaults but preserves custom rows", () => {
+      const custom = service.createPrompt(inDefault({ name: "Mine", body: "body" }));
+      client.db
+        .insert(prompts)
+        .values({
+          libraryId: defaultLibrary.id,
+          name: "Obsolete default",
+          body: "old",
+          position: 99,
+          defaultKey: "obsolete-default",
+        })
+        .run();
+      client.db
+        .insert(promptCategories)
+        .values({
+          libraryId: defaultLibrary.id,
+          name: "Obsolete category",
+          position: 99,
+          defaultKey: "obsolete-category",
+        })
+        .run();
+
+      const restored = service.restoreDefaults();
+
+      expect(restored.restored).toEqual([
+        "removed:prompt:obsolete-default",
+        "removed:category:obsolete-category",
+      ]);
+      expect(
+        service.listPrompts().some(
+          ({ prompt }) => prompt.defaultKey === "obsolete-default",
+        ),
+      ).toBe(false);
+      expect(
+        service
+          .listCategories()
+          .some((category) => category.defaultKey === "obsolete-category"),
+      ).toBe(false);
+      expect(service.getPrompt(custom.prompt.id).prompt.position).toBe(
+        defaultPrompts.length,
+      );
+    });
+
+    it("never reads or writes other libraries", () => {
+      // Custom holds unkeyed copies of the seed under their canonical names,
+      // which is exactly what adoption would pick up if it were not scoped.
+      const customPlanning = service
+        .listCategories({ libraryId: customLibrary.id })
+        .find((category) => category.name === "Planning")!;
+      const customSeedCopy = service
+        .listPrompts({ libraryId: customLibrary.id })
+        .find(({ prompt }) => prompt.name === defaultPrompts[0].name)!;
+      service.updatePrompt(customSeedCopy.prompt.id, { body: "Edited in Custom" });
+      service.createPrompt({
+        libraryId: customLibrary.id,
+        name: "Custom only",
+        body: "body",
+        categoryIds: [customPlanning.id],
+      });
+      const customBefore = snapshotLibrary(customLibrary.id);
+
+      const defaultPlanning = service
+        .listCategories({ libraryId: defaultLibrary.id })
+        .find((category) => category.defaultKey === "planning")!;
+      service.deleteCategory(defaultPlanning.id);
+      const [defaultFirst] = promptIds();
+      service.deletePrompt(defaultFirst);
+
+      const restored = service.restoreDefaults();
+
+      expect(restored.restored).toContain("category:planning");
+      expect(restored.restored).toContain(`prompt:${defaultPrompts[0].defaultKey}`);
+      expect(restored.library.id).toBe(defaultLibrary.id);
+      expect(restored.prompts.every(({ prompt }) => prompt.libraryId === defaultLibrary.id)).toBe(
+        true,
+      );
+      expect(snapshotLibrary(customLibrary.id)).toEqual(customBefore);
+      expect(service.getCategory(customPlanning.id).defaultKey).toBeNull();
+      expect(service.getPrompt(customSeedCopy.prompt.id).prompt).toMatchObject({
+        defaultKey: null,
+        body: "Edited in Custom",
+      });
+      expect(service.restoreDefaults().restored).toEqual([]);
+    });
+
+    it("recreates a missing Default library row", () => {
+      client.db
+        .delete(promptLibraries)
+        .where(eq(promptLibraries.id, defaultLibrary.id))
+        .run();
+
+      const restored = service.restoreDefaults();
+
+      expect(restored.library.defaultKey).toBe(DEFAULT_PROMPT_LIBRARY_KEY);
+      expect(restored.prompts).toHaveLength(defaultPrompts.length);
+      expect(restored.restored).toHaveLength(
+        defaultPrompts.length + defaultPromptCategories.length,
+      );
+    });
   });
 });

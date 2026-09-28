@@ -14,9 +14,12 @@ export interface DefaultPrompt {
   categoryDefaultKeys: string[];
 }
 
-// Seed data shared by the 0006_prompt_library.sql migration and
-// PromptService.restoreDefaults(). The migration carries the same values as
-// SQL literals; prompt-service.test.ts asserts the two stay in sync.
+// The system prompt catalog. PromptService.ensureDefaultLibrary() seeds the
+// Default library from it on startup and restoreDefaults() reconciles the
+// Default library back to it, so this file is the single source of truth.
+// 0006_prompt_library.sql carried an earlier copy as SQL literals; since
+// 0007_prompt_libraries.sql those rows live unkeyed in the Custom library and
+// no longer need to match.
 export const defaultPromptCategories: DefaultPromptCategory[] = [
   {
     defaultKey: "planning",
