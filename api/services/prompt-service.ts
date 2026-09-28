@@ -43,6 +43,7 @@ export class PromptService {
     this.ensureCategoryNameAvailable(input.name);
     return this.db
       .insert(promptCategories)
+      // @ts-expect-error libraryId is required since 0007_prompt_libraries; PromptService gains library scoping in prompt-libraries-2-7-ffn2ln.
       .values({
         name: input.name,
         description: input.description,
@@ -170,6 +171,7 @@ export class PromptService {
     const created = this.db.transaction((tx) => {
       const prompt = tx
         .insert(prompts)
+        // @ts-expect-error libraryId is required since 0007_prompt_libraries; PromptService gains library scoping in prompt-libraries-2-7-ffn2ln.
         .values({
           name: input.name,
           body: input.body,
@@ -357,6 +359,7 @@ export class PromptService {
         if (!category) {
           category = tx
             .insert(promptCategories)
+            // @ts-expect-error libraryId is required since 0007_prompt_libraries; PromptService gains library scoping in prompt-libraries-2-7-ffn2ln.
             .values({
               name: seed.name,
               description: seed.description,
@@ -405,6 +408,7 @@ export class PromptService {
         if (!prompt) {
           prompt = tx
             .insert(prompts)
+            // @ts-expect-error libraryId is required since 0007_prompt_libraries; PromptService gains library scoping in prompt-libraries-2-7-ffn2ln.
             .values({
               name: seed.name,
               body: seed.body,

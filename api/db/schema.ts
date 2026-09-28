@@ -304,10 +304,36 @@ export const taskAttachments = sqliteTable(
   }),
 );
 
+// Prompt libraries own categories and prompts. The Default library is the
+// one whose default_key is 'default'; it is seeded from
+// api/models/default-prompts.ts on startup and cannot be renamed or deleted.
+export const promptLibraries = sqliteTable(
+  "prompt_libraries",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    position: integer("position").notNull(),
+    defaultKey: text("default_key"),
+    metadata: jsonObject("metadata"),
+    createdAt: timestamp("created_at"),
+    updatedAt: updatedTimestamp(),
+  },
+  (table) => ({
+    nameUnique: uniqueIndex("prompt_libraries_name_unique").on(table.name),
+    defaultKeyUnique: uniqueIndex("prompt_libraries_default_key_unique").on(
+      table.defaultKey,
+    ),
+    positionIdx: index("prompt_libraries_position_idx").on(table.position),
+  }),
+);
+
 export const promptCategories = sqliteTable(
   "prompt_categories",
   {
     id: id(),
+    libraryId: text("library_id")
+      .notNull()
+      .references(() => promptLibraries.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     description: text("description"),
     position: integer("position").notNull(),
@@ -317,11 +343,17 @@ export const promptCategories = sqliteTable(
     updatedAt: updatedTimestamp(),
   },
   (table) => ({
-    nameUnique: uniqueIndex("prompt_categories_name_unique").on(table.name),
+    libraryNameUnique: uniqueIndex("prompt_categories_library_name_unique").on(
+      table.libraryId,
+      table.name,
+    ),
     defaultKeyUnique: uniqueIndex("prompt_categories_default_key_unique").on(
       table.defaultKey,
     ),
-    positionIdx: index("prompt_categories_position_idx").on(table.position),
+    libraryPositionIdx: index("prompt_categories_library_position_idx").on(
+      table.libraryId,
+      table.position,
+    ),
   }),
 );
 
@@ -329,6 +361,9 @@ export const prompts = sqliteTable(
   "prompts",
   {
     id: id(),
+    libraryId: text("library_id")
+      .notNull()
+      .references(() => promptLibraries.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     body: text("body").notNull(),
     note: text("note"),
@@ -341,10 +376,14 @@ export const prompts = sqliteTable(
     updatedAt: updatedTimestamp(),
   },
   (table) => ({
+    // Global on purpose: only the Default library ever carries default keys.
     defaultKeyUnique: uniqueIndex("prompts_default_key_unique").on(
       table.defaultKey,
     ),
-    positionIdx: index("prompts_position_idx").on(table.position),
+    libraryPositionIdx: index("prompts_library_position_idx").on(
+      table.libraryId,
+      table.position,
+    ),
     lastUsedIdx: index("prompts_last_used_idx").on(table.lastUsedAt),
   }),
 );
@@ -530,14 +569,30 @@ export const taskAttachmentsRelations = relations(taskAttachments, ({ one }) => 
   }),
 }));
 
+export const promptLibrariesRelations = relations(
+  promptLibraries,
+  ({ many }) => ({
+    categories: many(promptCategories),
+    prompts: many(prompts),
+  }),
+);
+
 export const promptCategoriesRelations = relations(
   promptCategories,
-  ({ many }) => ({
+  ({ one, many }) => ({
+    library: one(promptLibraries, {
+      fields: [promptCategories.libraryId],
+      references: [promptLibraries.id],
+    }),
     links: many(promptCategoryLinks),
   }),
 );
 
-export const promptsRelations = relations(prompts, ({ many }) => ({
+export const promptsRelations = relations(prompts, ({ one, many }) => ({
+  library: one(promptLibraries, {
+    fields: [prompts.libraryId],
+    references: [promptLibraries.id],
+  }),
   links: many(promptCategoryLinks),
 }));
 
@@ -596,6 +651,9 @@ export type NewTaskAttachment = typeof taskAttachments.$inferInsert;
 
 export type SearchDocument = typeof searchDocuments.$inferSelect;
 export type NewSearchDocument = typeof searchDocuments.$inferInsert;
+
+export type PromptLibrary = typeof promptLibraries.$inferSelect;
+export type NewPromptLibrary = typeof promptLibraries.$inferInsert;
 
 export type PromptCategory = typeof promptCategories.$inferSelect;
 export type NewPromptCategory = typeof promptCategories.$inferInsert;
