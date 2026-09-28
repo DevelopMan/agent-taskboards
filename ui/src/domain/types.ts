@@ -240,8 +240,25 @@ export interface SearchResponse {
   results: SearchResult[];
 }
 
+export interface PromptLibrary {
+  id: string;
+  name: string;
+  position: number;
+  defaultKey: string | null;
+  isDefault: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface PromptLibraryDeleteResponse {
+  library: PromptLibrary;
+  deleted: { prompts: number; categories: number };
+}
+
 export interface PromptCategory {
   id: string;
+  libraryId: string;
   name: string;
   description: string | null;
   position: number;
@@ -253,6 +270,7 @@ export interface PromptCategory {
 
 export interface Prompt {
   id: string;
+  libraryId: string;
   name: string;
   body: string;
   note: string | null;
@@ -268,6 +286,7 @@ export interface Prompt {
 
 export interface PromptRestoreDefaultsResponse {
   restored: string[];
+  library: PromptLibrary;
   categories: PromptCategory[];
   prompts: Prompt[];
 }

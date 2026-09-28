@@ -5,6 +5,7 @@ import {
   planAdjacentReorder,
   planReorder,
   reorderItems,
+  reorderItemsInLibrary,
 } from "./prompt-reorder";
 
 const ids = ["a", "b", "c", "d"];
@@ -114,6 +115,59 @@ describe("reorderItems", () => {
       { id: "a", name: "A" },
       { id: "b", name: "B" },
     ]);
+  });
+});
+
+describe("library-scoped reorders", () => {
+  const rows = [
+    { id: "d1", libraryId: "default" },
+    { id: "c1", libraryId: "custom" },
+    { id: "d2", libraryId: "default" },
+    { id: "c2", libraryId: "custom" },
+    { id: "d3", libraryId: "default" },
+  ];
+  const defaultIds = rows
+    .filter((row) => row.libraryId === "default")
+    .map((row) => row.id);
+
+  it("plans against the selected library's ids only", () => {
+    const plan = planReorder({ ids: defaultIds, draggedId: "d3", targetId: "d1" });
+
+    expect(plan).toEqual({ id: "d3", position: 0 });
+    expect(applyReorder(defaultIds, "d3", plan!.position)).toEqual(["d3", "d1", "d2"]);
+  });
+
+  it("refuses a drop involving a row from another library", () => {
+    expect(planReorder({ ids: defaultIds, draggedId: "c1", targetId: "d1" })).toBeNull();
+    expect(planReorder({ ids: defaultIds, draggedId: "d1", targetId: "c2" })).toBeNull();
+    expect(
+      planAdjacentReorder({ ids: defaultIds, visibleIds: defaultIds, id: "c1", delta: 1 }),
+    ).toBeNull();
+  });
+
+  it("mirrors the plan without moving rows of other libraries", () => {
+    const next = reorderItemsInLibrary(rows, "d3", 0);
+
+    expect(next.map((row) => row.id)).toEqual(["d3", "c1", "d1", "c2", "d2"]);
+    expect(next.filter((row) => row.libraryId === "custom")).toEqual([
+      rows[1],
+      rows[3],
+    ]);
+  });
+
+  it("interprets the position inside the moved row's library", () => {
+    // Position 1 in the custom library, not index 1 of the full list.
+    expect(reorderItemsInLibrary(rows, "c1", 1).map((row) => row.id)).toEqual([
+      "d1",
+      "c2",
+      "d2",
+      "c1",
+      "d3",
+    ]);
+  });
+
+  it("leaves the list untouched for an unknown row", () => {
+    expect(reorderItemsInLibrary(rows, "zz", 0)).toBe(rows);
   });
 });
 

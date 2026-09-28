@@ -16,7 +16,11 @@ import {
 import type { Prompt } from "../../domain/types";
 import { apiMessage } from "../../lib/errors";
 import { formatDate } from "../../lib/format";
-import { promptCountByCategory } from "./prompt-library-view";
+import {
+  categoriesInLibrary,
+  promptCountByCategory,
+  promptsInLibrary,
+} from "./prompt-library-view";
 import {
   dropEdge,
   planAdjacentReorder,
@@ -59,31 +63,43 @@ export function PromptsWorkspace() {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
 
+  // Interim scope until the library pills land: everything below works on
+  // the Default library only.
+  const libraryId = library.defaultLibrary?.id ?? null;
+  const prompts = useMemo(
+    () => promptsInLibrary(library.prompts, libraryId),
+    [library.prompts, libraryId],
+  );
+  const categories = useMemo(
+    () => categoriesInLibrary(library.categories, libraryId),
+    [library.categories, libraryId],
+  );
+
   const counts = useMemo(
-    () => promptCountByCategory(library.prompts),
-    [library.prompts],
+    () => promptCountByCategory(prompts),
+    [prompts],
   );
 
   const visiblePrompts = useMemo(() => {
     if (filter.type === "root") {
-      return library.prompts.filter((prompt) => prompt.categoryIds.length === 0);
+      return prompts.filter((prompt) => prompt.categoryIds.length === 0);
     }
     if (filter.type === "category") {
-      return library.prompts.filter((prompt) =>
+      return prompts.filter((prompt) =>
         prompt.categoryIds.includes(filter.categoryId),
       );
     }
-    return library.prompts;
-  }, [filter, library.prompts]);
+    return prompts;
+  }, [filter, prompts]);
 
   const selectedCategory =
     filter.type === "category"
-      ? library.categories.find((category) => category.id === filter.categoryId) ?? null
+      ? categories.find((category) => category.id === filter.categoryId) ?? null
       : null;
 
   const selectedPrompt =
     draft?.promptId != null
-      ? library.prompts.find((prompt) => prompt.id === draft.promptId) ?? null
+      ? prompts.find((prompt) => prompt.id === draft.promptId) ?? null
       : null;
 
   const draftDirty = draft
@@ -165,6 +181,10 @@ export function PromptsWorkspace() {
       setMutationError("Prompt name and body are required");
       return;
     }
+    if (draft.promptId === null && !libraryId) {
+      setMutationError("No prompt library is available yet");
+      return;
+    }
 
     const note = draft.note.trim() || null;
 
@@ -174,6 +194,7 @@ export function PromptsWorkspace() {
     try {
       if (draft.promptId === null) {
         const created = await library.createPrompt({
+          libraryId: libraryId!,
           name,
           body: draft.body,
           note,
@@ -239,12 +260,12 @@ export function PromptsWorkspace() {
 
   const createCategory = async () => {
     const name = newCategoryName.trim();
-    if (!name) {
+    if (!name || !libraryId) {
       return;
     }
     setMutationError(null);
     try {
-      const category = await library.createCategory({ name });
+      const category = await library.createCategory({ libraryId, name });
       setCreatingCategory(false);
       setNewCategoryName("");
       setFilter({ type: "category", categoryId: category.id });
@@ -296,8 +317,8 @@ export function PromptsWorkspace() {
   // resolved against the full list, never against the filtered rows.
   const orderedIds = (kind: "prompt" | "category") =>
     kind === "prompt"
-      ? library.prompts.map((prompt) => prompt.id)
-      : library.categories.map((category) => category.id);
+      ? prompts.map((prompt) => prompt.id)
+      : categories.map((category) => category.id);
 
   const applyPlan = (
     kind: "prompt" | "category",
@@ -401,7 +422,7 @@ export function PromptsWorkspace() {
 
   const pendingDeleteCategory =
     pendingDeleteCategoryId !== null
-      ? library.categories.find((category) => category.id === pendingDeleteCategoryId) ?? null
+      ? categories.find((category) => category.id === pendingDeleteCategoryId) ?? null
       : null;
 
   return (
@@ -470,7 +491,7 @@ export function PromptsWorkspace() {
           <nav className="prompts-rail__items">
             <PromptFilterItem
               active={filter.type === "all"}
-              count={library.prompts.length}
+              count={prompts.length}
               label="All prompts"
               onClick={() => setFilter({ type: "all" })}
             />
@@ -480,7 +501,7 @@ export function PromptsWorkspace() {
               label="Uncategorized"
               onClick={() => setFilter({ type: "root" })}
             />
-            {library.categories.map((category) => (
+            {categories.map((category) => (
               <div
                 className={rowClassName("prompts-rail__drag", "category", category.id)}
                 key={category.id}
@@ -693,10 +714,10 @@ export function PromptsWorkspace() {
               </label>
               <div className="prompt-editor__categories">
                 <span className="field__label">Categories</span>
-                {library.categories.length === 0 && (
+                {categories.length === 0 && (
                   <Mono faded>No categories yet</Mono>
                 )}
-                {library.categories.map((category) => (
+                {categories.map((category) => (
                   <label className="prompt-editor__category" key={category.id}>
                     <input
                       checked={draft.categoryIds.includes(category.id)}

@@ -5,6 +5,26 @@ export interface PromptGroup {
   prompts: Prompt[];
 }
 
+// Both the Prompt Manager and the Prompt Picker load every library at once
+// and narrow to the selected one on the client. These two helpers are that
+// narrowing, so every group, count, filter, and reorder below receives rows
+// from a single library. A null library (nothing loaded yet) scopes to
+// nothing rather than to everything.
+export function promptsInLibrary(prompts: Prompt[], libraryId: string | null): Prompt[] {
+  return libraryId === null
+    ? []
+    : prompts.filter((prompt) => prompt.libraryId === libraryId);
+}
+
+export function categoriesInLibrary(
+  categories: PromptCategory[],
+  libraryId: string | null,
+): PromptCategory[] {
+  return libraryId === null
+    ? []
+    : categories.filter((category) => category.libraryId === libraryId);
+}
+
 // Groups prompts by category in category order; prompts with no category
 // come last as the root-level group (category: null). A prompt linked to
 // several categories appears in each of them.

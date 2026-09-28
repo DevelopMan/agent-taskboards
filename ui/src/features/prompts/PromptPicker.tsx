@@ -14,10 +14,12 @@ import { buildNamedReferenceText } from "../../lib/entity-reference";
 import { buildTaskReferenceText } from "../../lib/task-reference";
 import { resolveParentTaskId } from "./parent-task";
 import {
+  categoriesInLibrary,
   filterPrompts,
   groupPromptsByCategory,
   promptGroupKey,
   promptRowKey,
+  promptsInLibrary,
   recentPromptGroupKey,
   recentPrompts,
 } from "./prompt-library-view";
@@ -156,20 +158,32 @@ export function PromptPicker({
     });
   };
 
+  // Interim scope until the library pills land: the picker shows the Default
+  // library only.
+  const libraryId = library.defaultLibrary?.id ?? null;
+  const prompts = useMemo(
+    () => promptsInLibrary(library.prompts, libraryId),
+    [library.prompts, libraryId],
+  );
+  const categories = useMemo(
+    () => categoriesInLibrary(library.categories, libraryId),
+    [library.categories, libraryId],
+  );
+
   const filteredPrompts = useMemo(
-    () => filterPrompts(library.prompts, query),
-    [library.prompts, query],
+    () => filterPrompts(prompts, query),
+    [prompts, query],
   );
   const recent = useMemo(
-    () => (query.trim() ? [] : recentPrompts(library.prompts, recentPromptLimit)),
-    [library.prompts, query],
+    () => (query.trim() ? [] : recentPrompts(prompts, recentPromptLimit)),
+    [prompts, query],
   );
   const groups = useMemo(
     () =>
-      groupPromptsByCategory(filteredPrompts, library.categories).filter(
+      groupPromptsByCategory(filteredPrompts, categories).filter(
         (group) => group.prompts.length > 0,
       ),
-    [filteredPrompts, library.categories],
+    [filteredPrompts, categories],
   );
 
   // Dragging writes the library's one global order, so it is suppressed while
@@ -207,7 +221,7 @@ export function PromptPicker({
       setDraggingPromptId(null);
       setDropTargetRowKey(null);
       const plan = planReorder({
-        ids: library.prompts.map((item) => item.id),
+        ids: prompts.map((item) => item.id),
         draggedId,
         targetId: promptId,
       });
@@ -234,7 +248,7 @@ export function PromptPicker({
     }
     if (reorderable && dropTargetRowKey === rowKey) {
       const edge = dropEdge(
-        library.prompts.map((item) => item.id),
+        prompts.map((item) => item.id),
         draggingPromptId,
         prompt.id,
       );
@@ -319,12 +333,12 @@ export function PromptPicker({
       />
       <InlineError message={library.error ?? copyError} />
       {library.loading && <SkeletonRows />}
-      {!library.loading && library.prompts.length === 0 && (
+      {!library.loading && prompts.length === 0 && (
         <div className="prompt-picker__empty">
           No prompts yet. Add some in the Prompts section.
         </div>
       )}
-      {!library.loading && filteredPrompts.length === 0 && library.prompts.length > 0 && (
+      {!library.loading && filteredPrompts.length === 0 && prompts.length > 0 && (
         <div className="prompt-picker__empty">No prompts match the filter.</div>
       )}
       <div className="prompt-picker__groups">

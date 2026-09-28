@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Prompt, PromptCategory } from "../../domain/types";
 import {
+  categoriesInLibrary,
   filterPrompts,
   groupPromptsByCategory,
   promptCountByCategory,
   promptGroupKey,
   promptRowKey,
+  promptsInLibrary,
   recentPromptGroupKey,
   recentPrompts,
 } from "./prompt-library-view";
@@ -13,6 +15,7 @@ import {
 function prompt(overrides: Partial<Prompt> = {}): Prompt {
   return {
     id: "prompt_1",
+    libraryId: "lib_default",
     name: "Prompt",
     body: "Body",
     note: null,
@@ -31,6 +34,7 @@ function prompt(overrides: Partial<Prompt> = {}): Prompt {
 function category(overrides: Partial<PromptCategory> = {}): PromptCategory {
   return {
     id: "cat_1",
+    libraryId: "lib_default",
     name: "Category",
     description: null,
     position: 0,
@@ -41,6 +45,73 @@ function category(overrides: Partial<PromptCategory> = {}): PromptCategory {
     ...overrides,
   };
 }
+
+describe("promptsInLibrary and categoriesInLibrary", () => {
+  const inDefault = prompt({ id: "p1" });
+  const inCustom = prompt({ id: "p2", libraryId: "lib_custom" });
+  const catDefault = category({ id: "cat_a" });
+  const catCustom = category({ id: "cat_b", libraryId: "lib_custom" });
+
+  it("keeps only the rows of the given library, in their existing order", () => {
+    const prompts = [inCustom, inDefault, prompt({ id: "p3" })];
+
+    expect(promptsInLibrary(prompts, "lib_default").map((item) => item.id)).toEqual([
+      "p1",
+      "p3",
+    ]);
+    expect(promptsInLibrary(prompts, "lib_custom").map((item) => item.id)).toEqual(["p2"]);
+    expect(categoriesInLibrary([catCustom, catDefault], "lib_default")).toEqual([catDefault]);
+  });
+
+  it("scopes to nothing while no library is selected", () => {
+    expect(promptsInLibrary([inDefault, inCustom], null)).toEqual([]);
+    expect(categoriesInLibrary([catDefault, catCustom], null)).toEqual([]);
+    expect(promptsInLibrary([inDefault], "lib_missing")).toEqual([]);
+  });
+
+  it("feeds grouping and counts so another library's rows never leak in", () => {
+    const prompts = [
+      prompt({ id: "p1", categoryIds: ["cat_a"] }),
+      prompt({ id: "p2", libraryId: "lib_custom", categoryIds: ["cat_b"] }),
+      prompt({ id: "p3", libraryId: "lib_custom" }),
+      prompt({ id: "p4" }),
+    ];
+    const categories = [catDefault, catCustom];
+
+    const scopedPrompts = promptsInLibrary(prompts, "lib_default");
+    const scopedCategories = categoriesInLibrary(categories, "lib_default");
+    const groups = groupPromptsByCategory(scopedPrompts, scopedCategories);
+
+    expect(groups.map((group) => group.category?.id ?? null)).toEqual(["cat_a", null]);
+    expect(groups[0].prompts.map((item) => item.id)).toEqual(["p1"]);
+    expect(groups[1].prompts.map((item) => item.id)).toEqual(["p4"]);
+
+    const counts = promptCountByCategory(scopedPrompts);
+    expect(counts.get("cat_a")).toBe(1);
+    expect(counts.get("cat_b")).toBeUndefined();
+    expect(counts.get(null)).toBe(1);
+
+    const customGroups = groupPromptsByCategory(
+      promptsInLibrary(prompts, "lib_custom"),
+      categoriesInLibrary(categories, "lib_custom"),
+    );
+    expect(customGroups.map((group) => group.category?.id ?? null)).toEqual(["cat_b", null]);
+    expect(customGroups[0].prompts.map((item) => item.id)).toEqual(["p2"]);
+    expect(customGroups[1].prompts.map((item) => item.id)).toEqual(["p3"]);
+  });
+
+  it("keeps Recent per library", () => {
+    const prompts = [
+      prompt({ id: "p1", lastUsedAt: "2026-09-01T00:00:00.000Z" }),
+      prompt({ id: "p2", libraryId: "lib_custom", lastUsedAt: "2026-09-20T00:00:00.000Z" }),
+      prompt({ id: "p3", lastUsedAt: "2026-09-10T00:00:00.000Z" }),
+    ];
+
+    expect(
+      recentPrompts(promptsInLibrary(prompts, "lib_default"), 3).map((item) => item.id),
+    ).toEqual(["p3", "p1"]);
+  });
+});
 
 describe("groupPromptsByCategory", () => {
   it("groups by category order with root-level prompts last", () => {

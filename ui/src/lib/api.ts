@@ -10,6 +10,8 @@ import type {
   ProjectActivityResponse,
   Prompt,
   PromptCategory,
+  PromptLibrary,
+  PromptLibraryDeleteResponse,
   PromptRestoreDefaultsResponse,
   SearchInput,
   SearchResponse,
@@ -339,14 +341,47 @@ export const api = {
   getTaskContext: async (taskId: string) =>
     request<TaskContext>(`/api/tasks/${encodeURIComponent(taskId)}/context`),
 
-  listPromptCategories: async () => {
+  listPromptLibraries: async () => {
+    const body = await request<{ libraries: PromptLibrary[] }>(
+      "/api/prompt-libraries",
+    );
+    return body.libraries;
+  },
+
+  createPromptLibrary: async (input: { name: string }) => {
+    const body = await request<{ library: PromptLibrary }>(
+      "/api/prompt-libraries",
+      { method: "POST", body: jsonBody(input) },
+    );
+    return body.library;
+  },
+
+  renamePromptLibrary: async (libraryId: string, input: { name: string }) => {
+    const body = await request<{ library: PromptLibrary }>(
+      `/api/prompt-libraries/${encodeURIComponent(libraryId)}`,
+      { method: "PATCH", body: jsonBody(input) },
+    );
+    return body.library;
+  },
+
+  deletePromptLibrary: async (libraryId: string) =>
+    request<PromptLibraryDeleteResponse>(
+      `/api/prompt-libraries/${encodeURIComponent(libraryId)}`,
+      { method: "DELETE" },
+    ),
+
+  listPromptCategories: async (input: { libraryId?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (input.libraryId) params.set("libraryId", input.libraryId);
+    const query = params.toString();
     const body = await request<{ categories: PromptCategory[] }>(
-      "/api/prompt-categories",
+      `/api/prompt-categories${query ? `?${query}` : ""}`,
     );
     return body.categories;
   },
 
   createPromptCategory: async (input: {
+    libraryId: string;
     name: string;
     description?: string | null;
   }) => {
@@ -384,8 +419,11 @@ export const api = {
     return body.category;
   },
 
-  listPrompts: async (input: { categoryId?: string; q?: string } = {}) => {
+  listPrompts: async (
+    input: { libraryId?: string; categoryId?: string; q?: string } = {},
+  ) => {
     const params = new URLSearchParams();
+    if (input.libraryId) params.set("libraryId", input.libraryId);
     if (input.categoryId) params.set("categoryId", input.categoryId);
     if (input.q) params.set("q", input.q);
     const query = params.toString();
@@ -403,6 +441,7 @@ export const api = {
   },
 
   createPrompt: async (input: {
+    libraryId: string;
     name: string;
     body: string;
     note?: string | null;

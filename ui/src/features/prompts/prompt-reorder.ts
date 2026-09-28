@@ -55,6 +55,27 @@ export function reorderItems<T extends { id: string }>(
   );
 }
 
+// Positions are per library on the server, so the local mirror of a reorder
+// rewrites only the moved row's library: the rows of that library are
+// reordered as one list and put back into the slots they occupied, and every
+// other row stays exactly where it was.
+export function reorderItemsInLibrary<T extends { id: string; libraryId: string }>(
+  items: T[],
+  id: string,
+  position: number,
+): T[] {
+  const moved = items.find((item) => item.id === id);
+  if (!moved) {
+    return items;
+  }
+  const inLibrary = items.filter((item) => item.libraryId === moved.libraryId);
+  const reordered = reorderItems(inLibrary, id, position);
+  let next = 0;
+  return items.map((item) =>
+    item.libraryId === moved.libraryId ? reordered[next++]! : item,
+  );
+}
+
 // Drop targets are always resolved against the full ordered list, never the
 // filtered one: prompts carry a single global order, and a category view is
 // only a projection of it.

@@ -1,22 +1,40 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Prompt, PromptCategory } from "../../domain/types";
+import type {
+  Prompt,
+  PromptCategory,
+  PromptLibrary,
+  PromptLibraryDeleteResponse,
+} from "../../domain/types";
 import { api } from "../../lib/api";
 import { apiMessage } from "../../lib/errors";
-import { reorderItems } from "./prompt-reorder";
+import { reorderItemsInLibrary } from "./prompt-reorder";
 
-export interface PromptLibrary {
+// The hook loads every library with all of its categories and prompts once;
+// the Manager and the Picker narrow to their selected library on the client
+// (see `promptsInLibrary`), so switching pills never refetches.
+export interface PromptLibraryState {
+  libraries: PromptLibrary[];
+  defaultLibrary: PromptLibrary | null;
   categories: PromptCategory[];
   prompts: Prompt[];
   loading: boolean;
   error: string | null;
   reload: () => Promise<void>;
-  createCategory: (input: { name: string; description?: string | null }) => Promise<PromptCategory>;
+  createLibrary: (input: { name: string }) => Promise<PromptLibrary>;
+  renameLibrary: (libraryId: string, input: { name: string }) => Promise<PromptLibrary>;
+  deleteLibrary: (libraryId: string) => Promise<PromptLibraryDeleteResponse>;
+  createCategory: (input: {
+    libraryId: string;
+    name: string;
+    description?: string | null;
+  }) => Promise<PromptCategory>;
   updateCategory: (
     categoryId: string,
     input: { name?: string; description?: string | null },
   ) => Promise<PromptCategory>;
   deleteCategory: (categoryId: string) => Promise<void>;
   createPrompt: (input: {
+    libraryId: string;
     name: string;
     body: string;
     note?: string | null;
@@ -38,7 +56,8 @@ export interface PromptLibrary {
   restoreDefaults: () => Promise<string[]>;
 }
 
-export function usePromptLibrary(): PromptLibrary {
+export function usePromptLibrary(): PromptLibraryState {
+  const [libraries, setLibraries] = useState<PromptLibrary[]>([]);
   const [categories, setCategories] = useState<PromptCategory[]>([]);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,10 +73,12 @@ export function usePromptLibrary(): PromptLibrary {
   const reload = useCallback(async () => {
     setError(null);
     try {
-      const [nextCategories, nextPrompts] = await Promise.all([
+      const [nextLibraries, nextCategories, nextPrompts] = await Promise.all([
+        api.listPromptLibraries(),
         api.listPromptCategories(),
         api.listPrompts(),
       ]);
+      setLibraries(nextLibraries);
       setCategories(nextCategories);
       setPrompts(nextPrompts);
     } catch (cause) {
@@ -71,8 +92,35 @@ export function usePromptLibrary(): PromptLibrary {
     void reload();
   }, [reload]);
 
+  const createLibrary = useCallback(
+    async (input: { name: string }) => {
+      const library = await api.createPromptLibrary(input);
+      await reload();
+      return library;
+    },
+    [reload],
+  );
+
+  const renameLibrary = useCallback(
+    async (libraryId: string, input: { name: string }) => {
+      const library = await api.renamePromptLibrary(libraryId, input);
+      await reload();
+      return library;
+    },
+    [reload],
+  );
+
+  const deleteLibrary = useCallback(
+    async (libraryId: string) => {
+      const result = await api.deletePromptLibrary(libraryId);
+      await reload();
+      return result;
+    },
+    [reload],
+  );
+
   const createCategory = useCallback(
-    async (input: { name: string; description?: string | null }) => {
+    async (input: { libraryId: string; name: string; description?: string | null }) => {
       const category = await api.createPromptCategory(input);
       await reload();
       return category;
@@ -102,6 +150,7 @@ export function usePromptLibrary(): PromptLibrary {
 
   const createPrompt = useCallback(
     async (input: {
+      libraryId: string;
       name: string;
       body: string;
       note?: string | null;
@@ -141,11 +190,13 @@ export function usePromptLibrary(): PromptLibrary {
 
   // Both reorders paint the new order locally first so the dragged row does
   // not snap back, then reconcile against the server's renormalized
-  // positions. A failed call restores the pre-drag order.
+  // positions. A failed call restores the pre-drag order. `position` is an
+  // index into the moved row's library, matching the server, so the local
+  // mirror touches that library only.
   const reorderPrompt = useCallback(
     async (promptId: string, position: number) => {
       const previous = promptsRef.current;
-      setPrompts(reorderItems(previous, promptId, position));
+      setPrompts(reorderItemsInLibrary(previous, promptId, position));
       try {
         await api.reorderPrompt(promptId, position);
         await reload();
@@ -160,7 +211,7 @@ export function usePromptLibrary(): PromptLibrary {
   const reorderCategory = useCallback(
     async (categoryId: string, position: number) => {
       const previous = categoriesRef.current;
-      setCategories(reorderItems(previous, categoryId, position));
+      setCategories(reorderItemsInLibrary(previous, categoryId, position));
       try {
         await api.reorderPromptCategory(categoryId, position);
         await reload();
@@ -179,19 +230,25 @@ export function usePromptLibrary(): PromptLibrary {
     );
   }, []);
 
+  // The restore response carries only the Default library's rows, so the
+  // other libraries are refetched rather than overwritten.
   const restoreDefaults = useCallback(async () => {
     const result = await api.restorePromptDefaults();
-    setCategories(result.categories);
-    setPrompts(result.prompts);
+    await reload();
     return result.restored;
-  }, []);
+  }, [reload]);
 
   return {
+    libraries,
+    defaultLibrary: libraries.find((library) => library.isDefault) ?? null,
     categories,
     prompts,
     loading,
     error,
     reload,
+    createLibrary,
+    renameLibrary,
+    deleteLibrary,
     createCategory,
     updateCategory,
     deleteCategory,

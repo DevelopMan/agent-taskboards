@@ -145,4 +145,47 @@ describe("api client", () => {
       JSON.stringify({ name: "Before edits", description: null }),
     );
   });
+
+  it("filters prompt lists by library and routes library mutations", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ prompts: [] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ categories: [] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ library: { id: "lib 1" } }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            library: { id: "lib 1" },
+            deleted: { prompts: 2, categories: 1 },
+          }),
+          { status: 200 },
+        ),
+      );
+
+    await api.listPrompts({ libraryId: "lib 1", q: "review" });
+    await api.listPromptCategories({ libraryId: "lib 1" });
+    await api.renamePromptLibrary("lib 1", { name: "Renamed" });
+    const deletion = await api.deletePromptLibrary("lib 1");
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/prompts?libraryId=lib+1&q=review",
+      "/api/prompt-categories?libraryId=lib+1",
+      "/api/prompt-libraries/lib%201",
+      "/api/prompt-libraries/lib%201",
+    ]);
+    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ method: "PATCH" });
+    expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(
+      JSON.stringify({ name: "Renamed" }),
+    );
+    expect(fetchMock.mock.calls[3]?.[1]).toMatchObject({ method: "DELETE" });
+    expect(deletion.deleted).toEqual({ prompts: 2, categories: 1 });
+  });
 });
