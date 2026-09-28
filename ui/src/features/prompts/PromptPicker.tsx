@@ -7,21 +7,23 @@ import {
   type RefObject,
 } from "react";
 import { Icon, InlineError, Mono, SkeletonRows } from "../../components/ui";
-import type { Board, Project, Prompt, Task } from "../../domain/types";
+import type { Board, Project, Prompt, PromptLibrary, Task } from "../../domain/types";
 import { api } from "../../lib/api";
 import { copyTextToClipboard } from "../../lib/clipboard";
 import { buildNamedReferenceText } from "../../lib/entity-reference";
 import { buildTaskReferenceText } from "../../lib/task-reference";
 import { resolveParentTaskId } from "./parent-task";
 import {
-  categoriesInLibrary,
-  filterPrompts,
-  groupPromptsByCategory,
+  persistLibraryId,
+  promptPickerLibraryStorageKey,
+  resolveSelectedLibrary,
+  storedLibraryId,
+} from "./prompt-library-selection";
+import {
+  pickerPromptView,
   promptGroupKey,
   promptRowKey,
-  promptsInLibrary,
   recentPromptGroupKey,
-  recentPrompts,
 } from "./prompt-library-view";
 import { dropEdge, planReorder, promptDragType } from "./prompt-reorder";
 import { renderPromptBody, type PromptTokenValues } from "./prompt-tokens";
@@ -46,6 +48,9 @@ export function PromptPicker({
 }) {
   const library = usePromptLibrary();
   const [query, setQuery] = useState("");
+  const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(() =>
+    storedLibraryId(promptPickerLibraryStorageKey),
+  );
   // Row state is keyed by row, not by prompt: the same prompt is rendered in
   // `Recent` and in each of its categories, and only the clicked row should
   // react. See `promptRowKey`.
@@ -158,33 +163,46 @@ export function PromptPicker({
     });
   };
 
-  // Interim scope until the library pills land: the picker shows the Default
-  // library only.
-  const libraryId = library.defaultLibrary?.id ?? null;
-  const prompts = useMemo(
-    () => promptsInLibrary(library.prompts, libraryId),
-    [library.prompts, libraryId],
-  );
-  const categories = useMemo(
-    () => categoriesInLibrary(library.categories, libraryId),
-    [library.categories, libraryId],
+  // The selected pill scopes everything below it. A remembered id that no
+  // longer exists resolves to Default on every render, so a library deleted
+  // in the Manager never leaves the picker pointing at nothing.
+  const selectedLibrary = resolveSelectedLibrary(library.libraries, selectedLibraryId);
+  const libraryId = selectedLibrary?.id ?? null;
+  const {
+    prompts,
+    filtered: filteredPrompts,
+    recent,
+    groups,
+  } = useMemo(
+    () =>
+      pickerPromptView({
+        prompts: library.prompts,
+        categories: library.categories,
+        libraryId,
+        query,
+        recentLimit: recentPromptLimit,
+      }),
+    [library.prompts, library.categories, libraryId, query],
   );
 
-  const filteredPrompts = useMemo(
-    () => filterPrompts(prompts, query),
-    [prompts, query],
-  );
-  const recent = useMemo(
-    () => (query.trim() ? [] : recentPrompts(prompts, recentPromptLimit)),
-    [prompts, query],
-  );
-  const groups = useMemo(
-    () =>
-      groupPromptsByCategory(filteredPrompts, categories).filter(
-        (group) => group.prompts.length > 0,
-      ),
-    [filteredPrompts, categories],
-  );
+  // Row state belongs to the rows of the library being left; the filter is
+  // kept so one term can be tried across libraries.
+  const selectLibrary = (target: PromptLibrary) => {
+    if (target.id === libraryId) {
+      return;
+    }
+    setSelectedLibraryId(target.id);
+    persistLibraryId(promptPickerLibraryStorageKey, target.id);
+    if (copiedBlinkTimeout.current) {
+      window.clearTimeout(copiedBlinkTimeout.current);
+      copiedBlinkTimeout.current = null;
+    }
+    setExpandedRowKey(null);
+    setCopiedRowKey(null);
+    setCopyError(null);
+    setDraggingPromptId(null);
+    setDropTargetRowKey(null);
+  };
 
   // Dragging writes the library's one global order, so it is suppressed while
   // the filter hides rows: the resulting order would be hard to predict.
@@ -324,6 +342,38 @@ export function PromptPicker({
           <Icon name="close" />
         </button>
       </div>
+      {library.libraries.length > 1 && (
+        // Read-only: libraries are created, renamed, and deleted in the
+        // Manager. With a single library there is nothing to choose, so the
+        // row stays out of the narrow rail.
+        <div
+          aria-label="Prompt libraries"
+          className="prompt-picker__libraries"
+          role="group"
+        >
+          {library.libraries.map((item) => {
+            const active = item.id === libraryId;
+            return (
+              <span
+                className={
+                  active ? "prompts-library prompts-library--active" : "prompts-library"
+                }
+                key={item.id}
+              >
+                <button
+                  aria-pressed={active}
+                  className="prompts-library__select"
+                  onClick={() => selectLibrary(item)}
+                  title={item.name}
+                  type="button"
+                >
+                  {item.name}
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
       <input
         aria-label="Filter prompts"
         className="prompt-picker__filter"
@@ -333,10 +383,13 @@ export function PromptPicker({
       />
       <InlineError message={library.error ?? copyError} />
       {library.loading && <SkeletonRows />}
-      {!library.loading && prompts.length === 0 && (
+      {!library.loading && selectedLibrary === null && (
         <div className="prompt-picker__empty">
           No prompts yet. Add some in the Prompts section.
         </div>
+      )}
+      {!library.loading && selectedLibrary !== null && prompts.length === 0 && (
+        <div className="prompt-picker__empty">No prompts in this library yet.</div>
       )}
       {!library.loading && filteredPrompts.length === 0 && prompts.length > 0 && (
         <div className="prompt-picker__empty">No prompts match the filter.</div>

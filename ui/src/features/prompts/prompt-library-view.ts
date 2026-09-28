@@ -65,6 +65,44 @@ export function filterPrompts(prompts: Prompt[], query: string): Prompt[] {
   );
 }
 
+export interface PickerPromptView {
+  // Every prompt of the selected library, in library order: the list drag
+  // reorder plans are built from, whatever the filter shows.
+  prompts: Prompt[];
+  filtered: Prompt[];
+  recent: Prompt[];
+  groups: PromptGroup[];
+}
+
+// The Prompt Picker shows one library at a time. `Recent` is drawn from that
+// library only and is hidden while a filter is active; empty category groups
+// are dropped so a filter never leaves bare headings behind.
+export function pickerPromptView({
+  prompts,
+  categories,
+  libraryId,
+  query,
+  recentLimit,
+}: {
+  prompts: Prompt[];
+  categories: PromptCategory[];
+  libraryId: string | null;
+  query: string;
+  recentLimit: number;
+}): PickerPromptView {
+  const scoped = promptsInLibrary(prompts, libraryId);
+  const filtered = filterPrompts(scoped, query);
+  return {
+    prompts: scoped,
+    filtered,
+    recent: query.trim() ? [] : recentPrompts(scoped, recentLimit),
+    groups: groupPromptsByCategory(
+      filtered,
+      categoriesInLibrary(categories, libraryId),
+    ).filter((group) => group.prompts.length > 0),
+  };
+}
+
 export function promptCountByCategory(prompts: Prompt[]): Map<string | null, number> {
   const counts = new Map<string | null, number>();
   for (const prompt of prompts) {

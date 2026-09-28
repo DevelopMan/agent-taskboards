@@ -152,9 +152,21 @@ The prompt picker opens from a toggle in the task detail header and extends
 as a nested sidebar on the task detail's left. It is visible by default, and
 closing or reopening it saves that preference in the browser. It shows:
 
+- a read-only row of library pills, only when more than one library exists
 - a filter input over prompt names and bodies
-- a `Recent` group with the most recently used prompts for one-click copying
-- prompts grouped by category, with root-level prompts last
+- a `Recent` group with up to three of the selected library's most recently
+  used prompts for one-click copying
+- the selected library's prompts grouped by category, with root-level prompts
+  last
+
+The picker shows one library at a time. Its selection is remembered in the
+browser under `taskboards.task.promptPickerLibraryId`, independently of the
+Prompt Manager's, and falls back to Default when the stored library no longer
+exists. Filtering, `Recent`, the groups, and drag reorder all stay inside the
+selected library, so a prompt used in another library never appears in
+`Recent` here and a drag never rewrites another library's order. Switching
+pills keeps the filter text and resets the expanded preview and copy
+confirmation. An empty library reads "No prompts in this library yet."
 
 Clicking a prompt row copies the rendered body (tokens replaced) to the
 clipboard, records usage through `POST /api/prompts/:promptId/use`, and blinks

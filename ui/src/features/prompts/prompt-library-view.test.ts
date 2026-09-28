@@ -4,6 +4,7 @@ import {
   categoriesInLibrary,
   filterPrompts,
   groupPromptsByCategory,
+  pickerPromptView,
   promptCountByCategory,
   promptGroupKey,
   promptRowKey,
@@ -110,6 +111,57 @@ describe("promptsInLibrary and categoriesInLibrary", () => {
     expect(
       recentPrompts(promptsInLibrary(prompts, "lib_default"), 3).map((item) => item.id),
     ).toEqual(["p3", "p1"]);
+  });
+});
+
+describe("pickerPromptView", () => {
+  const catDefault = category({ id: "cat_a" });
+  const catDefaultEmpty = category({ id: "cat_c", position: 1 });
+  const catCustom = category({ id: "cat_b", libraryId: "lib_custom" });
+  const categories = [catDefault, catCustom, catDefaultEmpty];
+  const prompts = [
+    prompt({ id: "d1", categoryIds: ["cat_a"], lastUsedAt: "2026-09-01T00:00:00.000Z" }),
+    prompt({ id: "c1", libraryId: "lib_custom", categoryIds: ["cat_b"], lastUsedAt: "2026-09-25T00:00:00.000Z" }),
+    prompt({ id: "d2", name: "Review", lastUsedAt: "2026-09-10T00:00:00.000Z" }),
+    prompt({ id: "d3", categoryIds: ["cat_a"], lastUsedAt: "2026-09-05T00:00:00.000Z" }),
+    prompt({ id: "d4", categoryIds: ["cat_a"], lastUsedAt: "2026-09-03T00:00:00.000Z" }),
+    prompt({ id: "c2", libraryId: "lib_custom", name: "Review" }),
+  ];
+  const view = (libraryId: string | null, query = "") =>
+    pickerPromptView({ prompts, categories, libraryId, query, recentLimit: 3 });
+  const ids = (items: Prompt[]) => items.map((item) => item.id);
+
+  it("draws Recent from the selected library only, newest first and capped", () => {
+    // c1 is the most recent use overall but belongs to another library.
+    expect(ids(view("lib_default").recent)).toEqual(["d2", "d3", "d4"]);
+    expect(ids(view("lib_custom").recent)).toEqual(["c1"]);
+  });
+
+  it("groups only the selected library's categories and root-level prompts", () => {
+    const { groups, prompts: scoped } = view("lib_default");
+
+    expect(ids(scoped)).toEqual(["d1", "d2", "d3", "d4"]);
+    // The empty cat_c is dropped; cat_b belongs to Custom.
+    expect(groups.map((group) => group.category?.id ?? null)).toEqual(["cat_a", null]);
+    expect(ids(groups[0].prompts)).toEqual(["d1", "d3", "d4"]);
+    expect(ids(groups[1].prompts)).toEqual(["d2"]);
+
+    const custom = view("lib_custom");
+    expect(custom.groups.map((group) => group.category?.id ?? null)).toEqual(["cat_b", null]);
+    expect(ids(custom.groups[1].prompts)).toEqual(["c2"]);
+  });
+
+  it("filters inside the library, hides Recent, and keeps the full list for reorder", () => {
+    const filtered = view("lib_default", "review");
+
+    expect(filtered.recent).toEqual([]);
+    expect(ids(filtered.filtered)).toEqual(["d2"]);
+    expect(filtered.groups.map((group) => group.category?.id ?? null)).toEqual([null]);
+    expect(ids(filtered.prompts)).toEqual(["d1", "d2", "d3", "d4"]);
+  });
+
+  it("shows nothing while no library is selected", () => {
+    expect(view(null)).toEqual({ prompts: [], filtered: [], recent: [], groups: [] });
   });
 });
 

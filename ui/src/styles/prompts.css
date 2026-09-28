@@ -458,6 +458,24 @@
   font-weight: 600;
 }
 
+/* The picker reuses the Manager's `.prompts-library` pills; only the row is
+   its own, flush with the rail's padding instead of a bordered sub-toolbar. */
+.prompt-picker__libraries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  min-width: 0;
+}
+
+.prompt-picker__libraries .prompts-library {
+  max-width: 100%;
+}
+
+.prompt-picker__libraries .prompts-library__select {
+  max-width: 100%;
+  padding: 0 var(--s-2);
+}
+
 .prompt-picker__filter {
   width: 100%;
 }

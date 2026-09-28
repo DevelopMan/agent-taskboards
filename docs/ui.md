@@ -170,16 +170,29 @@ The prompt picker brings the library to the task detail:
   sidebar on the task detail's left, attached rather than floating
 - it is visible by default; closing or reopening it saves the visibility
   preference in the browser for future task details
-- the initial state leads with recently used prompts for one-click copying
+- when more than one library exists, a read-only row of library pills sits
+  between the title row and the filter, wrapping inside the narrow rail;
+  creating, renaming, and deleting libraries stays in the Prompt Library view,
+  and with a single library the row is hidden
+- the selected pill scopes the filter, `Recent`, the category and root-level
+  groups, and drag reorder; switching pills keeps the filter text but closes
+  the expanded preview and clears the copy confirmation
+- the selection is remembered in the browser under
+  `taskboards.task.promptPickerLibraryId`, separately from the Prompt Library
+  view's, and falls back to Default when the stored id no longer exists
+- the initial state leads with the selected library's recently used prompts
+  for one-click copying
 - one click copies the prompt body with `{{TASK}}`, `{{PARENT_TASK}}`,
   `{{BOARD}}` and `{{PROJECT}}` tokens rendered from the open task and its
   board context; a row expands to preview the exact text
 - an expanded row shows the author's note after the preview; the note is never
   copied
 - unresolved tokens copy as their bare names and never block the copy
-- prompts in a category group reorder by dragging, writing the same global
-  order the library view shows; `Recent` is usage-sorted and never draggable,
+- prompts in a category group reorder by dragging, writing the same
+  per-library order the library view shows; `Recent` is usage-sorted and never draggable,
   and dragging is suppressed while the filter hides rows
+- an empty selected library reads "No prompts in this library yet."; a filter
+  with no matches keeps its own message
 
 ## Maintenance Experience
 
