@@ -297,7 +297,7 @@ export class PromptService {
       .orderBy(asc(prompts.position), asc(prompts.name))
       .all();
 
-    const linksByPromptId = this.linksByPromptId();
+    const linksByPromptId = this.linksByPromptId(query.libraryId);
 
     if (query.categoryId) {
       this.getCategory(query.categoryId);
@@ -772,10 +772,18 @@ export class PromptService {
     return row?.count ?? 0;
   }
 
-  private linksByPromptId() {
+  // Scoped to one library when asked, so a library-scoped listing (and the
+  // restore-defaults response built from it) never reads other libraries'
+  // links and stays proportional to the selected library.
+  private linksByPromptId(libraryId?: string) {
     const links = this.db
-      .select()
+      .select({
+        promptId: promptCategoryLinks.promptId,
+        categoryId: promptCategoryLinks.categoryId,
+      })
       .from(promptCategoryLinks)
+      .innerJoin(prompts, eq(prompts.id, promptCategoryLinks.promptId))
+      .where(libraryId ? eq(prompts.libraryId, libraryId) : undefined)
       .orderBy(asc(promptCategoryLinks.position))
       .all();
 
