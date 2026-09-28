@@ -577,6 +577,169 @@ describe("starter API", () => {
     expect(deletedCategory.status).toBe(404);
   });
 
+  it("exports a prompt library as a downloadable JSON document", async () => {
+    const response = await fetch(
+      `${baseUrl}/api/prompt-libraries/${CUSTOM_PROMPT_LIBRARY_ID}/export`,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(response.headers.get("content-disposition")).toBe(
+      'attachment; filename="custom.prompt-library.json"',
+    );
+    const body = asObject(await response.json());
+    expect(stringProp(body, "format")).toBe("taskboards-prompt-library");
+    expect(numberProp(body, "version")).toBe(1);
+    expect(objectProp(body, "library")).toEqual({ name: "Custom", metadata: {} });
+    expect(arrayProp(body, "categories").length).toBeGreaterThan(0);
+    const firstPrompt = asObject(arrayProp(body, "prompts")[0]);
+    expect(Object.keys(firstPrompt).sort()).toEqual([
+      "body",
+      "categories",
+      "metadata",
+      "name",
+      "note",
+    ]);
+
+    const missing = await api("GET", "/api/prompt-libraries/nope/export");
+    expect(missing.status).toBe(404);
+  });
+
+  it("imports a prompt library and reports name conflicts", async () => {
+    const document = {
+      format: "taskboards-prompt-library",
+      version: 1,
+      exportedAt: "2026-09-28T12:00:00.000Z",
+      library: { name: "Team" },
+      categories: [{ name: "Planning" }],
+      prompts: [
+        { name: "Plan", body: "Plan {{TASK}}", categories: ["Planning"] },
+        { name: "Loose", body: "x" },
+      ],
+    };
+
+    const created = await api("POST", "/api/prompt-libraries/import", document);
+    expect(created.status).toBe(201);
+    expect(stringProp(created.body, "mode")).toBe("create");
+    expect(objectProp(created.body, "created")).toEqual({ categories: 1, prompts: 2 });
+    expect(objectProp(created.body, "updated")).toEqual({ categories: 0, prompts: 0 });
+    expect(objectProp(created.body, "skipped")).toEqual({ prompts: 0 });
+    const library = objectProp(created.body, "library");
+    expect(stringProp(library, "name")).toBe("Team");
+    expect(booleanProp(library, "isDefault")).toBe(false);
+
+    const conflict = await api("POST", "/api/prompt-libraries/import", document);
+    expect(conflict.status).toBe(409);
+    const conflictError = objectProp(conflict.body, "error");
+    expect(stringProp(conflictError, "code")).toBe("invalid_state");
+    expect(objectProp(conflictError, "details")).toEqual({
+      conflict: "library_exists",
+      libraryId: stringProp(library, "id"),
+      name: "Team",
+    });
+
+    const appended = await api("POST", "/api/prompt-libraries/import", {
+      ...document,
+      onConflict: "append",
+    });
+    expect(appended.status).toBe(200);
+    expect(stringProp(appended.body, "mode")).toBe("append");
+    expect(objectProp(appended.body, "skipped")).toEqual({ prompts: 2 });
+    expect(stringProp(objectProp(appended.body, "library"), "id")).toBe(
+      stringProp(library, "id"),
+    );
+
+    const copied = await api("POST", "/api/prompt-libraries/import", {
+      ...document,
+      onConflict: "copy",
+    });
+    expect(copied.status).toBe(201);
+    expect(stringProp(copied.body, "mode")).toBe("copy");
+    expect(stringProp(objectProp(copied.body, "library"), "name")).toBe("Team (2)");
+
+    const ambiguous = await api("POST", "/api/prompt-libraries/import", {
+      ...document,
+      onConflict: "replace",
+      prompts: [
+        { name: "Plan", body: "a" },
+        { name: "Plan", body: "b" },
+      ],
+    });
+    expect(ambiguous.status).toBe(409);
+    expect(objectProp(objectProp(ambiguous.body, "error"), "details")).toEqual({
+      conflict: "ambiguous_prompt_names",
+      inFile: ["Plan"],
+      inLibrary: [],
+    });
+
+    const badShape = await api("POST", "/api/prompt-libraries/import", {
+      ...document,
+      library: { name: "Other" },
+      prompts: [{ name: "Plan", body: "x", categories: ["Missing"] }],
+    });
+    expect(badShape.status).toBe(400);
+    const issues = arrayProp(
+      objectProp(objectProp(badShape.body, "error"), "details"),
+      "issues",
+    );
+    expect(asObject(issues[0]).path).toEqual(["prompts", 0, "categories", 0]);
+
+    const wrongMode = await api("POST", "/api/prompt-libraries/import", {
+      ...document,
+      onConflict: "merge",
+    });
+    expect(wrongMode.status).toBe(400);
+
+    const libraries = await api("GET", "/api/prompt-libraries");
+    expect(
+      arrayProp(libraries.body, "libraries").map((item) =>
+        stringProp(asObject(item), "name"),
+      ),
+    ).toEqual(["Default", "Custom", "Team", "Team (2)"]);
+  });
+
+  it("caps the import body at 5 MB and answers bad JSON with 400", async () => {
+    const big = await fetch(`${baseUrl}/api/prompt-libraries/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        format: "taskboards-prompt-library",
+        version: 1,
+        library: { name: "Huge" },
+        categories: [],
+        prompts: [{ name: "Big", body: "x".repeat(5 * 1024 * 1024 + 1) }],
+      }),
+    });
+    expect(big.status).toBe(413);
+    const bigError = objectProp(await big.json(), "error");
+    expect(stringProp(bigError, "code")).toBe("invalid_request");
+    expect(objectProp(bigError, "details")).toEqual({ type: "entity.too.large" });
+
+    // Under the import cap but over the app-wide default, to show the two
+    // parsers are separate.
+    const medium = await api("POST", "/api/prompt-libraries/import", {
+      format: "taskboards-prompt-library",
+      version: 1,
+      library: { name: "Medium" },
+      categories: [],
+      prompts: [{ name: "Big", body: "x".repeat(200 * 1024) }],
+    });
+    expect(medium.status).toBe(201);
+    const tooBigElsewhere = await api("POST", "/api/prompt-libraries", {
+      name: "x".repeat(200 * 1024),
+    });
+    expect(tooBigElsewhere.status).toBe(413);
+
+    const malformed = await fetch(`${baseUrl}/api/prompt-libraries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{not json",
+    });
+    expect(malformed.status).toBe(400);
+    expect(
+      stringProp(objectProp(await malformed.json(), "error"), "message"),
+    ).toBe("Request body is not valid JSON");
+  });
+
   it("keeps prompts and categories inside the library they were created in", async () => {
     const missingLibraryPrompt = await api("POST", "/api/prompts", {
       libraryId: "not-a-library",

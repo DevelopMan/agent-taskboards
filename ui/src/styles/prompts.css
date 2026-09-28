@@ -38,6 +38,7 @@
 }
 
 .prompts-library__select,
+.prompts-library__export,
 .prompts-library__remove,
 .prompts-libraries__add {
   border: 0;
@@ -57,34 +58,78 @@
   white-space: nowrap;
 }
 
-/* The pill keeps its right padding when it carries an `x`, so the glyph sits
-   inside the rounded end instead of hanging off it. */
-.prompts-library__select:has(+ .prompts-library__remove) {
+/* The pill keeps its right padding when it carries icon buttons, so the
+   glyphs sit inside the rounded end instead of hanging off it. */
+.prompts-library__select:has(+ .prompts-library__export) {
   padding-right: var(--s-1);
 }
 
 /* Always in the DOM for the keyboard; visually quiet until the pill is
-   hovered or focused so the row does not read as a line of delete buttons. */
+   hovered or focused so the row does not read as a line of icon buttons.
+   The export arrow is on every pill, the delete `x` on all but Default. */
+.prompts-library__export,
 .prompts-library__remove {
   display: inline-grid;
   width: 20px;
   height: 22px;
   place-items: center;
-  margin-right: 2px;
   padding: 0;
   border-radius: 50%;
   color: var(--fg-faint);
   opacity: 0.55;
 }
 
+.prompts-library__export:last-child,
+.prompts-library__remove {
+  margin-right: 2px;
+}
+
+.prompts-library:hover .prompts-library__export,
 .prompts-library:hover .prompts-library__remove,
+.prompts-library:focus-within .prompts-library__export,
 .prompts-library:focus-within .prompts-library__remove {
   opacity: 1;
 }
 
+.prompts-library__export:hover,
 .prompts-library__remove:hover {
   background: var(--bg-active);
   color: var(--fg);
+}
+
+.prompts-library__export:disabled {
+  cursor: default;
+  opacity: 0.3;
+}
+
+/* The file picker is driven by the Import button. */
+.prompts-import-input {
+  display: none;
+}
+
+/* Import result line: same slot as .inline-error, calm colours. */
+.inline-notice {
+  flex-shrink: 0;
+  padding: 6px var(--s-4);
+  border-bottom: 1px solid color-mix(in oklch, var(--status-done) 35%, var(--line));
+  background: color-mix(in oklch, var(--status-done) 8%, var(--bg-app));
+  color: var(--fg);
+  font-size: var(--fs-12);
+}
+
+.import-conflict__options {
+  margin: var(--s-2) 0 0;
+  padding-left: var(--s-4);
+  display: grid;
+  gap: var(--s-1);
+}
+
+.import-conflict__actions {
+  flex-wrap: wrap;
+}
+
+.import-conflict__spacer {
+  flex: 1;
 }
 
 .prompts-library--editing {

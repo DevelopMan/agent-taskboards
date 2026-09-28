@@ -4,6 +4,22 @@ Important changes to Agent Taskboards are documented in this file.
 
 ## Released
 
+### 2026-09-28
+
+- **Prompt library import and export** (`import-and-export-prompt-3ksuvl`):
+  A prompt library can be downloaded as one JSON file
+  (`GET /api/prompt-libraries/:libraryId/export`, also from the `Export`
+  button and a download icon on every library pill) and a file can be
+  imported (`POST /api/prompt-libraries/import`, the `Import` button). The
+  file carries only content and metadata, never ids, default keys, or usage
+  counters. Importing a file whose library name is taken asks whether to
+  append missing prompts and categories, append and replace same-named
+  prompts in place (keeping order, usage, and default keys, so `Restore
+  defaults` still applies), or import as a `<name> (2)` copy. Imports are
+  validated whole and written in one transaction. The import route accepts
+  bodies up to 5 MB, and oversized or malformed JSON bodies on any route now
+  answer with `413`/`400` instead of `500`.
+
 ### 2026-09-27
 
 - **Cross-platform lockfile repair** (`add-continuous-integration-for-tbsg8t`):

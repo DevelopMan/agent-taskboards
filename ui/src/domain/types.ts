@@ -284,6 +284,48 @@ export interface Prompt {
   updatedAt: string | null;
 }
 
+// The export file format. Array order is position order; `prompt.categories`
+// order is the link order. Ids, timestamps, default keys, and usage are not
+// part of it.
+export interface PromptLibraryExportCategory {
+  name: string;
+  description: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface PromptLibraryExportPrompt {
+  name: string;
+  body: string;
+  note: string | null;
+  metadata: Record<string, unknown>;
+  categories: string[];
+}
+
+export interface PromptLibraryExport {
+  format: "taskboards-prompt-library";
+  version: 1;
+  exportedAt: string;
+  library: { name: string; metadata: Record<string, unknown> };
+  categories: PromptLibraryExportCategory[];
+  prompts: PromptLibraryExportPrompt[];
+}
+
+export type PromptLibraryImportMode = "append" | "replace" | "copy";
+
+export interface PromptLibraryImportResult {
+  library: PromptLibrary;
+  mode: "create" | PromptLibraryImportMode;
+  created: { categories: number; prompts: number };
+  updated: { categories: number; prompts: number };
+  skipped: { prompts: number };
+}
+
+export interface PromptLibraryExportDownload {
+  blob: Blob;
+  // From the Content-Disposition header; null when the header is missing.
+  fileName: string | null;
+}
+
 export interface PromptRestoreDefaultsResponse {
   restored: string[];
   library: PromptLibrary;

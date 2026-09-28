@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { actorTypes, taskPriorities } from "../db/schema.js";
+import {
+  PROMPT_LIBRARY_EXPORT_FORMAT,
+  PROMPT_LIBRARY_EXPORT_VERSION,
+} from "../services/prompt-library-import.js";
 
 const jsonObjectSchema = z.record(z.unknown());
 const jsonArraySchema = z.array(z.unknown());
@@ -222,6 +226,92 @@ export const promptReorderSchema = z.object({
   position: z.number().int().min(0),
 });
 
+// Import documents are the export format plus an optional `onConflict`.
+// Names are trimmed like everywhere else; a blank `description` or `note`
+// reads as "none" so a hand-edited file does not fail on an empty string.
+const optionalText = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((value) => {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : null;
+  });
+const optionalMetadata = jsonObjectSchema
+  .optional()
+  .transform((value) => value ?? {});
+
+const promptLibraryExportCategorySchema = z.object({
+  name: requiredString,
+  description: optionalText,
+  metadata: optionalMetadata,
+});
+
+const promptLibraryExportPromptSchema = z.object({
+  name: requiredString,
+  body: promptBodySchema,
+  note: optionalText,
+  metadata: optionalMetadata,
+  categories: z
+    .array(requiredString)
+    .optional()
+    .transform((value) => value ?? []),
+});
+
+export const promptLibraryImportConflictModes = [
+  "append",
+  "replace",
+  "copy",
+] as const;
+
+export const promptLibraryImportSchema = z
+  .object({
+    format: z.literal(PROMPT_LIBRARY_EXPORT_FORMAT),
+    version: z.literal(PROMPT_LIBRARY_EXPORT_VERSION),
+    exportedAt: z.string().optional(),
+    library: z.object({
+      name: requiredString,
+      metadata: optionalMetadata,
+    }),
+    categories: z.array(promptLibraryExportCategorySchema),
+    prompts: z.array(promptLibraryExportPromptSchema),
+    onConflict: z.enum(promptLibraryImportConflictModes).optional(),
+  })
+  .superRefine((value, context) => {
+    const categoryNames = new Set<string>();
+    for (const [index, category] of value.categories.entries()) {
+      if (categoryNames.has(category.name)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["categories", index, "name"],
+          message: "Category names must be unique within the file",
+        });
+      }
+      categoryNames.add(category.name);
+    }
+
+    for (const [promptIndex, prompt] of value.prompts.entries()) {
+      const seen = new Set<string>();
+      for (const [index, name] of prompt.categories.entries()) {
+        const path = ["prompts", promptIndex, "categories", index];
+        if (!categoryNames.has(name)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path,
+            message: `Prompt category "${name}" is not listed in categories`,
+          });
+        } else if (seen.has(name)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path,
+            message: "A prompt cannot list the same category twice",
+          });
+        }
+        seen.add(name);
+      }
+    }
+  });
+
 const indexedSearchSourceTypes = ["board", "task", "comment"] as const;
 
 export const searchSchema = z.object({
@@ -255,3 +345,4 @@ export type PromptCreateInput = z.infer<typeof promptCreateSchema>;
 export type PromptUpdateInput = z.infer<typeof promptUpdateSchema>;
 export type PromptListQuery = z.infer<typeof promptListQuerySchema>;
 export type PromptReorderInput = z.infer<typeof promptReorderSchema>;
+export type PromptLibraryImportInput = z.infer<typeof promptLibraryImportSchema>;

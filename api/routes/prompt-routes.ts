@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import express, { type Express } from "express";
 import { parseBody, parseNonEmptyBody, parseQuery } from "../http/validation.js";
 import {
   promptCategoryCreateSchema,
@@ -6,6 +6,7 @@ import {
   promptCategoryUpdateSchema,
   promptCreateSchema,
   promptLibraryCreateSchema,
+  promptLibraryImportSchema,
   promptLibraryUpdateSchema,
   promptListQuerySchema,
   promptReorderSchema,
@@ -17,6 +18,12 @@ import {
   serializePromptLibrary,
 } from "../models/serializers.js";
 import type { ApiServices } from "../services/index.js";
+import { promptLibraryFileName } from "../services/prompt-library-import.js";
+
+// The import body is a whole library, so this route parses its own body with
+// a larger cap than the app-wide JSON parser, which skips this path.
+export const promptLibraryImportPath = "/api/prompt-libraries/import";
+export const promptLibraryImportBodyLimit = "5mb";
 
 export function registerPromptRoutes(app: Express, services: ApiServices) {
   app.get("/api/prompt-libraries", (_req, res) => {
@@ -28,6 +35,29 @@ export function registerPromptRoutes(app: Express, services: ApiServices) {
     const body = parseBody(req, promptLibraryCreateSchema);
     const library = services.prompts.createLibrary(body);
     res.status(201).json({ library: serializePromptLibrary(library) });
+  });
+
+  app.post(
+    promptLibraryImportPath,
+    express.json({ limit: promptLibraryImportBodyLimit }),
+    (req, res) => {
+      const body = parseBody(req, promptLibraryImportSchema);
+      const result = services.prompts.importLibrary(body);
+      const created = result.mode === "create" || result.mode === "copy";
+      res.status(created ? 201 : 200).json({
+        ...result,
+        library: serializePromptLibrary(result.library),
+      });
+    },
+  );
+
+  app.get("/api/prompt-libraries/:libraryId/export", (req, res) => {
+    const document = services.prompts.exportLibrary(req.params.libraryId);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${promptLibraryFileName(document.library.name)}"`,
+    );
+    res.json(document);
   });
 
   app.patch("/api/prompt-libraries/:libraryId", (req, res) => {

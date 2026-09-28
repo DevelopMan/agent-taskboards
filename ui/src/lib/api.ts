@@ -12,6 +12,10 @@ import type {
   PromptCategory,
   PromptLibrary,
   PromptLibraryDeleteResponse,
+  PromptLibraryExport,
+  PromptLibraryExportDownload,
+  PromptLibraryImportMode,
+  PromptLibraryImportResult,
   PromptRestoreDefaultsResponse,
   SearchInput,
   SearchResponse,
@@ -66,6 +70,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 function jsonBody(value: unknown) {
   return JSON.stringify(value);
+}
+
+// Parses `filename="..."` out of a Content-Disposition header. The server
+// only ever sends an ASCII slug, so no RFC 5987 decoding is needed.
+export function fileNameFromContentDisposition(header: string | null) {
+  const match = header?.match(/filename="([^"]+)"/);
+  return match?.[1] ?? null;
 }
 
 export const api = {
@@ -369,6 +380,39 @@ export const api = {
       `/api/prompt-libraries/${encodeURIComponent(libraryId)}`,
       { method: "DELETE" },
     ),
+
+  // Kept as a blob rather than parsed JSON so the download is byte-for-byte
+  // what the server wrote.
+  exportPromptLibrary: async (libraryId: string): Promise<PromptLibraryExportDownload> => {
+    const response = await fetch(
+      `/api/prompt-libraries/${encodeURIComponent(libraryId)}/export`,
+    );
+    if (!response.ok) {
+      const text = await response.text();
+      const errorBody = (text ? JSON.parse(text) : {}) as ApiErrorBody;
+      throw new ApiClientError(
+        response.status,
+        errorBody.error?.code ?? "request_failed",
+        errorBody.error?.message ?? `Request failed with ${response.status}`,
+        errorBody.error?.details,
+      );
+    }
+    return {
+      blob: await response.blob(),
+      fileName: fileNameFromContentDisposition(
+        response.headers.get("content-disposition"),
+      ),
+    };
+  },
+
+  importPromptLibrary: async (
+    document: PromptLibraryExport,
+    onConflict?: PromptLibraryImportMode,
+  ) =>
+    request<PromptLibraryImportResult>("/api/prompt-libraries/import", {
+      method: "POST",
+      body: jsonBody(onConflict ? { ...document, onConflict } : document),
+    }),
 
   listPromptCategories: async (input: { libraryId?: string } = {}) => {
     const params = new URLSearchParams();

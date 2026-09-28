@@ -154,6 +154,21 @@ from the sidebar `Prompts` entry, between Search and Maintenance:
   the shortcut also submits the new-category and rename-category forms
 - toolbar actions cover new prompt and new category; `Restore defaults` is
   rendered only while the Default library is selected
+- `Export` in the topbar downloads the selected library as
+  `<name-slug>.prompt-library.json`; every pill, Default included, also
+  carries a download icon, shown like the delete `x` on hover or focus and
+  always keyboard-reachable, that exports that pill's library without
+  selecting it
+- `Import` in the topbar opens a file picker; because a successful import
+  selects the imported library, the button obeys the unsaved-changes rule. A
+  file that is not a prompt library export is refused in place. When the
+  file's library name already exists, a dialog titled `“<name>” already
+  exists` offers `Append`, `Append and replace`, and `Import as copy` (see
+  `docs/prompts.md` for what each touches); a failure such as duplicate
+  prompt names shows inside the dialog so another mode can be picked. After
+  the import the created or target library is selected and a result line
+  (`Imported into “Team”: 2 categories and 5 prompts added, 3 replaced, 4
+  skipped`) stays in the error slot until the next action
 - prompts and rail categories reorder by dragging, with a drop indicator on the
   side the dragged row will land on; `Alt+Up`/`Alt+Down` on a focused row is the
   pointer-free equivalent, stepping one visible row at a time

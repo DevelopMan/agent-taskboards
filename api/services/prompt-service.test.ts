@@ -17,6 +17,11 @@ import {
   defaultPromptCategories,
   defaultPrompts,
 } from "../models/default-prompts.js";
+import type { PromptLibraryImportInput } from "../models/request-schemas.js";
+import {
+  PROMPT_LIBRARY_EXPORT_FORMAT,
+  PROMPT_LIBRARY_EXPORT_VERSION,
+} from "./prompt-library-import.js";
 import {
   DEFAULT_PROMPT_LIBRARY_ID,
   DEFAULT_PROMPT_LIBRARY_KEY,
@@ -982,6 +987,368 @@ describe("PromptService", () => {
       expect(restored.restored).toHaveLength(
         defaultPrompts.length + defaultPromptCategories.length,
       );
+    });
+  });
+
+  describe("export and import", () => {
+    // A parsed import document, shaped like promptLibraryImportSchema's
+    // output so the service sees exactly what the route hands it.
+    const document = (
+      overrides: Partial<PromptLibraryImportInput> = {},
+    ): PromptLibraryImportInput => ({
+      format: PROMPT_LIBRARY_EXPORT_FORMAT,
+      version: PROMPT_LIBRARY_EXPORT_VERSION,
+      exportedAt: "2026-09-28T12:00:00.000Z",
+      library: { name: "Team", metadata: { owner: "denis" } },
+      categories: [
+        { name: "Planning", description: "Before code", metadata: {} },
+        { name: "Ops", description: null, metadata: { color: "red" } },
+      ],
+      prompts: [
+        {
+          name: "Plan",
+          body: "Plan {{TASK}}",
+          note: "Use first",
+          metadata: {},
+          categories: ["Ops", "Planning"],
+        },
+        { name: "Deploy", body: "Deploy it", note: null, metadata: { k: 1 }, categories: ["Ops"] },
+        { name: "Loose", body: "No category", note: null, metadata: {}, categories: [] },
+      ],
+      ...overrides,
+    });
+
+    const libraryNames = () => service.listLibraries().map((library) => library.name);
+
+    it("exports content and metadata in position and link order without ids or counters", () => {
+      const library = service.createLibrary({ name: "Team" });
+      const ops = service.createCategory({ libraryId: library.id, name: "Ops" });
+      const planning = service.createCategory({
+        libraryId: library.id,
+        name: "Planning",
+        description: "Before code",
+      });
+      service.reorderCategory(planning.id, 0);
+      const plan = service.createPrompt({
+        libraryId: library.id,
+        name: "Plan",
+        body: "Plan {{TASK}}",
+        note: "Use first",
+        categoryIds: [ops.id, planning.id],
+        metadata: { k: 1 },
+      });
+      service.createPrompt({ libraryId: library.id, name: "Loose", body: "No category" });
+      service.recordPromptUse(plan.prompt.id);
+
+      const exported = service.exportLibrary(library.id);
+
+      expect(exported.format).toBe("taskboards-prompt-library");
+      expect(exported.version).toBe(1);
+      expect(Date.parse(exported.exportedAt)).not.toBeNaN();
+      expect(exported.library).toEqual({ name: "Team", metadata: {} });
+      expect(exported.categories).toEqual([
+        { name: "Planning", description: "Before code", metadata: {} },
+        { name: "Ops", description: null, metadata: {} },
+      ]);
+      expect(exported.prompts).toEqual([
+        {
+          name: "Plan",
+          body: "Plan {{TASK}}",
+          note: "Use first",
+          metadata: { k: 1 },
+          categories: ["Ops", "Planning"],
+        },
+        { name: "Loose", body: "No category", note: null, metadata: {}, categories: [] },
+      ]);
+    });
+
+    it("exports Default without default keys or usage", () => {
+      const exported = service.exportLibrary(defaultLibrary.id);
+      expect(exported.library.name).toBe("Default");
+      expect(exported.prompts).toHaveLength(defaultPrompts.length);
+      expect(exported.categories.map((category) => category.name)).toEqual(
+        defaultPromptCategories.map((seed) => seed.name),
+      );
+      for (const prompt of exported.prompts) {
+        expect(Object.keys(prompt).sort()).toEqual(
+          ["body", "categories", "metadata", "name", "note"],
+        );
+      }
+    });
+
+    it("rejects exporting an unknown library", () => {
+      expectApiError(() => service.exportLibrary("nope"), 404, "not_found");
+    });
+
+    it("imports a new library at the end and round-trips through export", () => {
+      const result = service.importLibrary(document());
+
+      expect(result.mode).toBe("create");
+      expect(result.created).toEqual({ categories: 2, prompts: 3 });
+      expect(result.updated).toEqual({ categories: 0, prompts: 0 });
+      expect(result.skipped).toEqual({ prompts: 0 });
+      expect(result.library).toMatchObject({
+        name: "Team",
+        defaultKey: null,
+        metadata: { owner: "denis" },
+        position: 2,
+      });
+      expect(libraryNames()).toEqual(["Default", "Custom", "Team"]);
+
+      const roundTrip = service.exportLibrary(result.library.id);
+      const source = document();
+      expect(roundTrip).toEqual({
+        ...source,
+        onConflict: undefined,
+        exportedAt: roundTrip.exportedAt,
+      });
+
+      const rows = service.listPrompts({ libraryId: result.library.id });
+      expect(rows.map(({ prompt }) => prompt.position)).toEqual([0, 1, 2]);
+      for (const { prompt } of rows) {
+        expect(prompt.usageCount).toBe(0);
+        expect(prompt.lastUsedAt).toBeNull();
+        expect(prompt.defaultKey).toBeNull();
+      }
+      expect(
+        service.listCategories({ libraryId: result.library.id }).map((category) => category.position),
+      ).toEqual([0, 1]);
+    });
+
+    it("reports a taken name as a conflict and writes nothing without onConflict", () => {
+      service.importLibrary(document());
+      const before = snapshotLibrary(service.listLibraries()[2]!.id);
+
+      let caught: unknown;
+      try {
+        service.importLibrary(document({ prompts: [] }));
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(ApiError);
+      const apiError = caught as ApiError;
+      expect(apiError.status).toBe(409);
+      expect(apiError.details).toEqual({
+        conflict: "library_exists",
+        libraryId: service.listLibraries()[2]!.id,
+        name: "Team",
+      });
+      expect(libraryNames()).toEqual(["Default", "Custom", "Team"]);
+      expect(snapshotLibrary(service.listLibraries()[2]!.id)).toEqual(before);
+    });
+
+    it("matches the Default library case-insensitively and other names exactly", () => {
+      expectApiError(
+        () => service.importLibrary(document({ library: { name: "dEFAULT", metadata: {} } })),
+        409,
+        "invalid_state",
+      );
+      expectApiError(
+        () => service.importLibrary(document({ library: { name: "Custom", metadata: {} } })),
+        409,
+        "invalid_state",
+      );
+      expect(libraryNames()).toEqual(["Default", "Custom"]);
+      // Anything other than Default is exact: a differently-cased name is new.
+      const result = service.importLibrary(document({ library: { name: "custom", metadata: {} } }));
+      expect(result.mode).toBe("create");
+      expect(libraryNames()).toEqual(["Default", "Custom", "custom"]);
+    });
+
+    it("imports as a suffixed copy without default keys", () => {
+      service.importLibrary(document());
+      const second = service.importLibrary(document({ onConflict: "copy" }));
+      const third = service.importLibrary(document({ onConflict: "copy" }));
+      expect(second.mode).toBe("copy");
+      expect(second.library.name).toBe("Team (2)");
+      expect(third.library.name).toBe("Team (3)");
+      expect(second.created).toEqual({ categories: 2, prompts: 3 });
+
+      const exported = service.exportLibrary(defaultLibrary.id);
+      const copy = service.importLibrary({ ...exported, onConflict: "copy" });
+      expect(copy.library.name).toBe("Default (2)");
+      expect(copy.library.defaultKey).toBeNull();
+      for (const { prompt } of service.listPrompts({ libraryId: copy.library.id })) {
+        expect(prompt.defaultKey).toBeNull();
+      }
+      for (const category of service.listCategories({ libraryId: copy.library.id })) {
+        expect(category.defaultKey).toBeNull();
+      }
+    });
+
+    it("append adds missing rows after the existing ones and is idempotent", () => {
+      const library = service.createLibrary({ name: "Team" });
+      const ops = service.createCategory({
+        libraryId: library.id,
+        name: "Ops",
+        description: "kept",
+      });
+      const existing = service.createPrompt({
+        libraryId: library.id,
+        name: "Plan",
+        body: "old body",
+        categoryIds: [ops.id],
+      });
+      service.recordPromptUse(existing.prompt.id);
+
+      const first = service.importLibrary(document({ onConflict: "append" }));
+      expect(first.mode).toBe("append");
+      expect(first.library.id).toBe(library.id);
+      expect(first.created).toEqual({ categories: 1, prompts: 2 });
+      expect(first.updated).toEqual({ categories: 0, prompts: 0 });
+      expect(first.skipped).toEqual({ prompts: 1 });
+
+      const categories = service.listCategories({ libraryId: library.id });
+      expect(categories.map((category) => [category.name, category.position, category.description])).toEqual([
+        ["Ops", 0, "kept"],
+        ["Planning", 1, "Before code"],
+      ]);
+      const rows = service.listPrompts({ libraryId: library.id });
+      expect(rows.map(({ prompt }) => [prompt.name, prompt.position])).toEqual([
+        ["Plan", 0],
+        ["Deploy", 1],
+        ["Loose", 2],
+      ]);
+      const plan = rows[0]!;
+      expect(plan.prompt.body).toBe("old body");
+      expect(plan.prompt.usageCount).toBe(1);
+      expect(plan.categoryIds).toEqual([ops.id]);
+      expect(rows[1]!.categoryIds).toEqual([ops.id]);
+
+      const snapshot = snapshotLibrary(library.id);
+      const second = service.importLibrary(document({ onConflict: "append" }));
+      expect(second.created).toEqual({ categories: 0, prompts: 0 });
+      expect(second.skipped).toEqual({ prompts: 3 });
+      expect(snapshotLibrary(library.id)).toEqual(snapshot);
+    });
+
+    it("replace overwrites matched rows in place and leaves the rest alone", () => {
+      const library = service.createLibrary({ name: "Team" });
+      const ops = service.createCategory({
+        libraryId: library.id,
+        name: "Ops",
+        description: "old",
+        metadata: { old: true },
+      });
+      const untouched = service.createPrompt({
+        libraryId: library.id,
+        name: "Untouched",
+        body: "stays",
+        categoryIds: [ops.id],
+      });
+      const existing = service.createPrompt({
+        libraryId: library.id,
+        name: "Plan",
+        body: "old body",
+        note: "old note",
+        categoryIds: [ops.id],
+      });
+      service.recordPromptUse(existing.prompt.id);
+
+      const result = service.importLibrary(document({ onConflict: "replace" }));
+      expect(result.mode).toBe("replace");
+      expect(result.created).toEqual({ categories: 1, prompts: 2 });
+      expect(result.updated).toEqual({ categories: 1, prompts: 1 });
+      expect(result.skipped).toEqual({ prompts: 0 });
+
+      const opsAfter = service.getCategory(ops.id);
+      expect(opsAfter).toMatchObject({ name: "Ops", description: null, metadata: { color: "red" }, position: 0 });
+      const planning = service
+        .listCategories({ libraryId: library.id })
+        .find((category) => category.name === "Planning")!;
+
+      const plan = service.getPrompt(existing.prompt.id);
+      expect(plan.prompt).toMatchObject({
+        name: "Plan",
+        body: "Plan {{TASK}}",
+        note: "Use first",
+        position: 1,
+        usageCount: 1,
+      });
+      expect(plan.categoryIds).toEqual([ops.id, planning.id]);
+      expect(service.getPrompt(untouched.prompt.id)).toEqual(untouched);
+      expect(
+        service.listPrompts({ libraryId: library.id }).map(({ prompt }) => prompt.name),
+      ).toEqual(["Untouched", "Plan", "Deploy", "Loose"]);
+    });
+
+    it("replace keeps default keys in Default so restore still reverts the edit", () => {
+      const seed = defaultPrompts[0]!;
+      const result = service.importLibrary({
+        ...document({ onConflict: "replace" }),
+        library: { name: "Default", metadata: {} },
+        categories: [],
+        prompts: [{ name: seed.name, body: "edited", note: null, metadata: {}, categories: [] }],
+      });
+      expect(result.library.id).toBe(defaultLibrary.id);
+      expect(result.updated).toEqual({ categories: 0, prompts: 1 });
+
+      const edited = service
+        .listPrompts({ libraryId: defaultLibrary.id })
+        .find(({ prompt }) => prompt.defaultKey === seed.defaultKey)!;
+      expect(edited.prompt.body).toBe("edited");
+      expect(edited.categoryIds).toEqual([]);
+
+      const restored = service.restoreDefaults();
+      expect(restored.restored).toContain(`prompt:${seed.defaultKey}`);
+      expect(service.getPrompt(edited.prompt.id).prompt.body).toBe(seed.body);
+    });
+
+    it("append may add user rows to Default", () => {
+      const before = service.listPrompts({ libraryId: defaultLibrary.id }).length;
+      const result = service.importLibrary({
+        ...document({ onConflict: "append" }),
+        library: { name: "Default", metadata: {} },
+      });
+      expect(result.library.id).toBe(defaultLibrary.id);
+      // "Planning" is a shipped default category, so only "Ops" is new.
+      expect(result.created).toEqual({ categories: 1, prompts: 3 });
+      expect(service.listPrompts({ libraryId: defaultLibrary.id })).toHaveLength(before + 3);
+      expect(service.getDefaultLibrary().metadata).toEqual({});
+    });
+
+    it("rejects ambiguous prompt names before writing anything", () => {
+      const library = service.createLibrary({ name: "Team" });
+      const inFile = document({
+        onConflict: "append",
+        prompts: [
+          { name: "Dup", body: "a", note: null, metadata: {}, categories: [] },
+          { name: "Dup", body: "b", note: null, metadata: {}, categories: [] },
+        ],
+      });
+      let caught: unknown;
+      try {
+        service.importLibrary(inFile);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(ApiError);
+      expect((caught as ApiError).status).toBe(409);
+      expect((caught as ApiError).details).toEqual({
+        conflict: "ambiguous_prompt_names",
+        inFile: ["Dup"],
+        inLibrary: [],
+      });
+      expect(snapshotLibrary(library.id)).toEqual({ categories: [], prompts: [] });
+
+      service.createPrompt({ libraryId: library.id, name: "Twin", body: "1" });
+      service.createPrompt({ libraryId: library.id, name: "Twin", body: "2" });
+      try {
+        service.importLibrary(document({ onConflict: "replace" }));
+      } catch (error) {
+        caught = error;
+      }
+      expect((caught as ApiError).details).toEqual({
+        conflict: "ambiguous_prompt_names",
+        inFile: [],
+        inLibrary: ["Twin"],
+      });
+      expect(service.listPrompts({ libraryId: library.id })).toHaveLength(2);
+
+      // Copy has no name-based matching, so the same file goes through.
+      const copy = service.importLibrary({ ...inFile, onConflict: "copy" });
+      expect(copy.library.name).toBe("Team (2)");
+      expect(copy.created.prompts).toBe(2);
     });
   });
 });

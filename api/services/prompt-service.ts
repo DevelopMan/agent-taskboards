@@ -19,9 +19,18 @@ import type {
   PromptCategoryUpdateInput,
   PromptCreateInput,
   PromptLibraryCreateInput,
+  PromptLibraryImportInput,
   PromptListQuery,
   PromptUpdateInput,
 } from "../models/request-schemas.js";
+import {
+  PROMPT_LIBRARY_EXPORT_FORMAT,
+  PROMPT_LIBRARY_EXPORT_VERSION,
+  planLibraryMerge,
+  resolveCopiedLibraryName,
+  type PromptLibraryExportDocument,
+  type PromptLibraryImportMode,
+} from "./prompt-library-import.js";
 
 type Transaction = Parameters<
   Parameters<DatabaseClient["db"]["transaction"]>[0]
@@ -44,6 +53,16 @@ export interface PromptLibraryDeletion {
   library: PromptLibrary;
   deleted: { prompts: number; categories: number };
 }
+
+export interface PromptLibraryImportResult {
+  library: PromptLibrary;
+  mode: PromptLibraryImportMode;
+  created: { categories: number; prompts: number };
+  updated: { categories: number; prompts: number };
+  skipped: { prompts: number };
+}
+
+type ImportDocument = Omit<PromptLibraryImportInput, "onConflict">;
 
 export class PromptService {
   private readonly db: DatabaseClient["db"];
@@ -148,6 +167,261 @@ export class PromptService {
     });
 
     return { library, deleted };
+  }
+
+  // Content and metadata only: ids, timestamps, default keys, and usage
+  // counters stay behind, so the file imports anywhere as plain user rows.
+  exportLibrary(libraryId: string): PromptLibraryExportDocument {
+    const library = this.getLibrary(libraryId);
+    const categories = this.listCategories({ libraryId: library.id });
+    const categoryNameById = new Map(
+      categories.map((category) => [category.id, category.name]),
+    );
+    return {
+      format: PROMPT_LIBRARY_EXPORT_FORMAT,
+      version: PROMPT_LIBRARY_EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      library: { name: library.name, metadata: library.metadata },
+      categories: categories.map(({ name, description, metadata }) => ({
+        name,
+        description,
+        metadata,
+      })),
+      prompts: this.listPrompts({ libraryId: library.id }).map(
+        ({ prompt, categoryIds }) => ({
+          name: prompt.name,
+          body: prompt.body,
+          note: prompt.note,
+          metadata: prompt.metadata,
+          categories: categoryIds
+            .map((id) => categoryNameById.get(id))
+            .filter((name): name is string => name !== undefined),
+        }),
+      ),
+    };
+  }
+
+  // Atomic: the target is resolved by the file's library name, the merge is
+  // planned, and every row is written inside one transaction, so a conflict
+  // or a bad row leaves the database exactly as it was. A taken name with no
+  // `onConflict` is reported back so the caller can ask the user.
+  importLibrary(input: PromptLibraryImportInput): PromptLibraryImportResult {
+    const { onConflict, ...document } = input;
+    const name = document.library.name;
+
+    return this.db.transaction((tx) => {
+      const target = this.findLibraryByName(tx, name);
+      if (!target) {
+        return this.importAsNewLibrary(
+          tx,
+          document,
+          this.validateLibraryName(name),
+          "create",
+        );
+      }
+      if (!onConflict) {
+        throw new ApiError(
+          409,
+          "invalid_state",
+          `Prompt library "${target.name}" already exists`,
+          { conflict: "library_exists", libraryId: target.id, name: target.name },
+        );
+      }
+      if (onConflict === "copy") {
+        const taken = new Set(
+          tx
+            .select({ name: promptLibraries.name })
+            .from(promptLibraries)
+            .all()
+            .map((row) => row.name),
+        );
+        return this.importAsNewLibrary(
+          tx,
+          document,
+          resolveCopiedLibraryName(name, taken),
+          "copy",
+        );
+      }
+      return this.mergeIntoLibrary(tx, document, target, onConflict);
+    });
+  }
+
+  private importAsNewLibrary(
+    tx: Transaction,
+    document: ImportDocument,
+    name: string,
+    mode: "create" | "copy",
+  ): PromptLibraryImportResult {
+    const library = tx
+      .insert(promptLibraries)
+      .values({
+        name,
+        position: this.nextLibraryPosition(tx),
+        metadata: document.library.metadata,
+      })
+      .returning()
+      .get();
+
+    const categoryIdByName = new Map<string, string>();
+    document.categories.forEach((category, position) => {
+      const row = tx
+        .insert(promptCategories)
+        .values({
+          libraryId: library.id,
+          name: category.name,
+          description: category.description,
+          position,
+          metadata: category.metadata,
+        })
+        .returning()
+        .get();
+      categoryIdByName.set(category.name, row.id);
+    });
+
+    document.prompts.forEach((prompt, position) => {
+      const row = tx
+        .insert(prompts)
+        .values({
+          libraryId: library.id,
+          name: prompt.name,
+          body: prompt.body,
+          note: prompt.note,
+          position,
+          metadata: prompt.metadata,
+        })
+        .returning()
+        .get();
+      this.insertLinks(tx, row.id, categoryIdsByName(prompt.categories, categoryIdByName));
+    });
+
+    return {
+      library,
+      mode,
+      created: {
+        categories: document.categories.length,
+        prompts: document.prompts.length,
+      },
+      updated: { categories: 0, prompts: 0 },
+      skipped: { prompts: 0 },
+    };
+  }
+
+  // Append and replace only add and, for replace, overwrite what the file
+  // names. Rows the file does not mention are never touched, and a matched
+  // row keeps its id, position, counters, and default key.
+  private mergeIntoLibrary(
+    tx: Transaction,
+    document: ImportDocument,
+    target: PromptLibrary,
+    mode: "append" | "replace",
+  ): PromptLibraryImportResult {
+    const existingCategories = tx
+      .select({ id: promptCategories.id, name: promptCategories.name })
+      .from(promptCategories)
+      .where(eq(promptCategories.libraryId, target.id))
+      .orderBy(asc(promptCategories.position), asc(promptCategories.name))
+      .all();
+    const existingPrompts = tx
+      .select({ id: prompts.id, name: prompts.name })
+      .from(prompts)
+      .where(eq(prompts.libraryId, target.id))
+      .orderBy(asc(prompts.position), asc(prompts.name))
+      .all();
+
+    const plan = planLibraryMerge(document, existingCategories, existingPrompts, mode);
+    if (!plan.ok) {
+      throw new ApiError(
+        409,
+        "invalid_state",
+        "Append and replace need unique prompt names in the file and in the target library",
+        { conflict: plan.conflict, inFile: plan.inFile, inLibrary: plan.inLibrary },
+      );
+    }
+
+    const categoryIdByName = new Map(
+      plan.categories.matched.map(({ name, id }) => [name, id]),
+    );
+    let categoryPosition = this.nextCategoryPosition(target.id, tx);
+    for (const category of plan.categories.create) {
+      const row = tx
+        .insert(promptCategories)
+        .values({
+          libraryId: target.id,
+          name: category.name,
+          description: category.description,
+          position: categoryPosition++,
+          metadata: category.metadata,
+        })
+        .returning()
+        .get();
+      categoryIdByName.set(category.name, row.id);
+    }
+    for (const { id, category } of plan.categories.update) {
+      tx
+        .update(promptCategories)
+        .set({ description: category.description, metadata: category.metadata })
+        .where(eq(promptCategories.id, id))
+        .run();
+    }
+
+    let promptPosition = this.nextPromptPosition(target.id, tx);
+    for (const prompt of plan.prompts.create) {
+      const row = tx
+        .insert(prompts)
+        .values({
+          libraryId: target.id,
+          name: prompt.name,
+          body: prompt.body,
+          note: prompt.note,
+          position: promptPosition++,
+          metadata: prompt.metadata,
+        })
+        .returning()
+        .get();
+      this.insertLinks(tx, row.id, categoryIdsByName(prompt.categories, categoryIdByName));
+    }
+    for (const { id, prompt } of plan.prompts.update) {
+      tx
+        .update(prompts)
+        .set({ body: prompt.body, note: prompt.note, metadata: prompt.metadata })
+        .where(eq(prompts.id, id))
+        .run();
+      tx
+        .delete(promptCategoryLinks)
+        .where(eq(promptCategoryLinks.promptId, id))
+        .run();
+      this.insertLinks(tx, id, categoryIdsByName(prompt.categories, categoryIdByName));
+    }
+
+    return {
+      library: target,
+      mode,
+      created: {
+        categories: plan.categories.create.length,
+        prompts: plan.prompts.create.length,
+      },
+      updated: {
+        categories: plan.categories.update.length,
+        prompts: plan.prompts.update.length,
+      },
+      skipped: { prompts: plan.prompts.skip.length },
+    };
+  }
+
+  // "Default" in any casing resolves to the system library, mirroring the
+  // reserved-name rule; every other name must match exactly.
+  private findLibraryByName(executor: Executor, name: string) {
+    if (name.toLowerCase() === DEFAULT_PROMPT_LIBRARY_NAME.toLowerCase()) {
+      const defaultLibrary = this.findDefaultLibrary(executor);
+      if (defaultLibrary) {
+        return defaultLibrary;
+      }
+    }
+    return executor
+      .select()
+      .from(promptLibraries)
+      .where(eq(promptLibraries.name, name))
+      .get();
   }
 
   // Creates the Default library row when it is missing and fills it from the
@@ -842,8 +1116,8 @@ export class PromptService {
     return (row?.max ?? -1) + 1;
   }
 
-  private nextCategoryPosition(libraryId: string) {
-    const row = this.db
+  private nextCategoryPosition(libraryId: string, tx?: Transaction) {
+    const row = (tx ?? this.db)
       .select({ max: sql<number | null>`MAX(${promptCategories.position})` })
       .from(promptCategories)
       .where(eq(promptCategories.libraryId, libraryId))
@@ -851,8 +1125,8 @@ export class PromptService {
     return (row?.max ?? -1) + 1;
   }
 
-  private nextLibraryPosition() {
-    const row = this.db
+  private nextLibraryPosition(tx?: Transaction) {
+    const row = (tx ?? this.db)
       .select({ max: sql<number | null>`MAX(${promptLibraries.position})` })
       .from(promptLibraries)
       .get();
@@ -924,6 +1198,19 @@ export class PromptService {
 
 export function isDefaultLibrary(library: PromptLibrary) {
   return library.defaultKey === DEFAULT_PROMPT_LIBRARY_KEY;
+}
+
+// The import schema guarantees every prompt category name is listed in the
+// file, and the plan resolves each listed name to a row before links are
+// written, so a missing id here would be a bug rather than bad input.
+function categoryIdsByName(names: string[], idByName: Map<string, string>) {
+  return names.map((name) => {
+    const id = idByName.get(name);
+    if (id === undefined) {
+      throw new Error(`Prompt category "${name}" was not resolved during import`);
+    }
+    return id;
+  });
 }
 
 // `position` is resolved against the list with the moved row already taken

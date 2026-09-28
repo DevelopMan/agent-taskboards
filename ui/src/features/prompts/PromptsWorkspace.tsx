@@ -1,7 +1,9 @@
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type DragEvent,
   type KeyboardEvent,
 } from "react";
@@ -14,9 +16,24 @@ import {
   Mono,
   SkeletonRows,
 } from "../../components/ui";
-import type { Prompt, PromptLibrary } from "../../domain/types";
+import type {
+  Prompt,
+  PromptLibrary,
+  PromptLibraryExport,
+  PromptLibraryImportMode,
+  PromptLibraryImportResult,
+} from "../../domain/types";
 import { apiMessage } from "../../lib/errors";
 import { formatDate } from "../../lib/format";
+import { ImportConflictDialog } from "./ImportConflictDialog";
+import {
+  findLibraryByName,
+  importFailureMessage,
+  importSummary,
+  isLibraryExistsConflict,
+  parsePromptLibraryFile,
+  promptLibraryFileName,
+} from "./prompt-library-export";
 import {
   persistLibraryId,
   promptManagerLibraryStorageKey,
@@ -58,6 +75,13 @@ interface LibraryNameDraft {
   name: string;
 }
 
+// A parsed file waiting on the user's conflict choice; `name` is the taken
+// library name as the server or the loaded list spells it.
+interface PendingImport {
+  document: PromptLibraryExport;
+  name: string;
+}
+
 export function PromptsWorkspace() {
   const library = usePromptLibrary();
   const [filter, setFilter] = useState<PromptFilter>({ type: "all" });
@@ -81,6 +105,13 @@ export function PromptsWorkspace() {
   );
   const [libraryNameDraft, setLibraryNameDraft] = useState<LibraryNameDraft | null>(null);
   const [pendingDeleteLibraryId, setPendingDeleteLibraryId] = useState<string | null>(null);
+  const [exportingLibraryId, setExportingLibraryId] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
+  // The import result line stays until the next action so its counts can be
+  // read; a new error or a library switch replaces it.
+  const [importNotice, setImportNotice] = useState<string | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
 
   // The selected pill scopes everything below it. A remembered id that no
   // longer exists resolves to Default on every render, so a library deleted
@@ -140,6 +171,12 @@ export function PromptsWorkspace() {
     setStatusMessage(message);
     window.setTimeout(() => setStatusMessage(null), 2400);
   };
+
+  useEffect(() => {
+    if (mutationError) {
+      setImportNotice(null);
+    }
+  }, [mutationError]);
 
   const resetDraftTo = (prompt: Prompt) => {
     setMutationError(null);
@@ -350,6 +387,7 @@ export function PromptsWorkspace() {
   const showLibrary = (nextId: string | null) => {
     setSelectedLibraryId(nextId);
     persistLibraryId(promptManagerLibraryStorageKey, nextId);
+    setImportNotice(null);
     setFilter({ type: "all" });
     setDraft(null);
     setNoteEditing(false);
@@ -433,6 +471,94 @@ export function PromptsWorkspace() {
     } else if (event.key === "Escape") {
       event.stopPropagation();
       setLibraryNameDraft(null);
+    }
+  };
+
+  // The file is exactly what the server wrote, so it downloads as a blob
+  // under the server's file name; the local slug only covers a proxy that
+  // dropped the header.
+  const exportLibrary = async (target: PromptLibrary) => {
+    if (exportingLibraryId) {
+      return;
+    }
+    setExportingLibraryId(target.id);
+    setMutationError(null);
+    try {
+      const { blob, fileName } = await library.exportLibrary(target.id);
+      downloadBlob(blob, fileName ?? promptLibraryFileName(target.name));
+      showStatus(`Exported “${target.name}”`);
+    } catch (cause) {
+      setMutationError(apiMessage(cause));
+    } finally {
+      setExportingLibraryId(null);
+    }
+  };
+
+  // A successful import selects its library, so importing over a dirty draft
+  // is refused up front, before the file picker opens.
+  const startImport = () => {
+    if (draftBlocksSwitching()) {
+      return;
+    }
+    importFileInputRef.current?.click();
+  };
+
+  const finishImport = (result: PromptLibraryImportResult) => {
+    if (result.library.id !== libraryIdRef.current) {
+      showLibrary(result.library.id);
+    }
+    setImportNotice(importSummary(result));
+  };
+
+  // Posts the file. A taken name without a mode opens the conflict dialog
+  // instead of failing; every other failure is rethrown as a readable error
+  // so the caller (button or dialog) can show it in its own place.
+  const importDocument = async (
+    exportDocument: PromptLibraryExport,
+    onConflict?: PromptLibraryImportMode,
+  ) => {
+    try {
+      finishImport(await library.importLibrary(exportDocument, onConflict));
+      return true;
+    } catch (cause) {
+      const exists = isLibraryExistsConflict(cause);
+      if (exists && !onConflict) {
+        setPendingImport({ document: exportDocument, name: exists.name });
+        return false;
+      }
+      const message = importFailureMessage(cause);
+      throw message ? new Error(message) : cause;
+    }
+  };
+
+  const importFromFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Reset so picking the same file again fires another change event.
+    event.target.value = "";
+    if (!file || importing) {
+      return;
+    }
+    setMutationError(null);
+    setImportNotice(null);
+    setImporting(true);
+    try {
+      const parsed = parsePromptLibraryFile(await file.text());
+      if (!parsed.ok) {
+        setMutationError(parsed.error);
+        return;
+      }
+      // Known names are caught here without a round trip; the server's 409
+      // covers a library created elsewhere since the last load.
+      const existing = findLibraryByName(library.libraries, parsed.document.library.name);
+      if (existing) {
+        setPendingImport({ document: parsed.document, name: existing.name });
+        return;
+      }
+      await importDocument(parsed.document);
+    } catch (cause) {
+      setMutationError(apiMessage(cause));
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -567,6 +693,36 @@ export function PromptsWorkspace() {
       <Topbar
         actions={
           <>
+            <Button
+              disabled={library.loading || !selectedLibrary || exportingLibraryId !== null}
+              icon={<Icon name="download" />}
+              onClick={() => {
+                if (selectedLibrary) {
+                  void exportLibrary(selectedLibrary);
+                }
+              }}
+              title="Download the selected library as a JSON file"
+              variant="ghost"
+            >
+              Export
+            </Button>
+            <Button
+              disabled={library.loading || importing}
+              icon={<Icon name="upload" />}
+              onClick={startImport}
+              title="Import a prompt library JSON file"
+              variant="ghost"
+            >
+              {importing ? "Importing" : "Import"}
+            </Button>
+            <input
+              accept="application/json,.json"
+              aria-label="Prompt library file"
+              className="prompts-import-input"
+              onChange={(event) => void importFromFile(event)}
+              ref={importFileInputRef}
+              type="file"
+            />
             {selectedLibrary?.isDefault && (
               <Button
                 disabled={restoring || library.loading}
@@ -639,6 +795,16 @@ export function PromptsWorkspace() {
               >
                 {item.name}
               </button>
+              <button
+                aria-label={`Export library ${item.name}`}
+                className="prompts-library__export"
+                disabled={exportingLibraryId !== null}
+                onClick={() => void exportLibrary(item)}
+                title="Export library as JSON"
+                type="button"
+              >
+                <Icon name="download" size={10} />
+              </button>
               {!item.isDefault && (
                 <button
                   aria-label={`Delete library ${item.name}`}
@@ -691,6 +857,11 @@ export function PromptsWorkspace() {
         )}
       </div>
       <InlineError message={library.error ?? mutationError} />
+      {importNotice && !mutationError && (
+        <div className="inline-notice" role="status">
+          {importNotice}
+        </div>
+      )}
       <div className="prompts-layout">
         <aside className="prompts-rail">
           <div className="prompts-rail__heading">
@@ -1086,8 +1257,31 @@ export function PromptsWorkspace() {
           title="Delete library?"
         />
       )}
+      {pendingImport && (
+        <ImportConflictDialog
+          name={pendingImport.name}
+          onCancel={() => setPendingImport(null)}
+          onChoose={async (mode) => {
+            if (await importDocument(pendingImport.document, mode)) {
+              setPendingImport(null);
+            }
+          }}
+        />
+      )}
     </>
   );
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = window.document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.rel = "noopener";
+  window.document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function countLabel(count: number, singular: string, plural = `${singular}s`) {

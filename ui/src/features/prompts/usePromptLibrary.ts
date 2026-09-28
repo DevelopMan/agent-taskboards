@@ -4,6 +4,10 @@ import type {
   PromptCategory,
   PromptLibrary,
   PromptLibraryDeleteResponse,
+  PromptLibraryExport,
+  PromptLibraryExportDownload,
+  PromptLibraryImportMode,
+  PromptLibraryImportResult,
 } from "../../domain/types";
 import { api } from "../../lib/api";
 import { apiMessage } from "../../lib/errors";
@@ -23,6 +27,11 @@ export interface PromptLibraryState {
   createLibrary: (input: { name: string }) => Promise<PromptLibrary>;
   renameLibrary: (libraryId: string, input: { name: string }) => Promise<PromptLibrary>;
   deleteLibrary: (libraryId: string) => Promise<PromptLibraryDeleteResponse>;
+  exportLibrary: (libraryId: string) => Promise<PromptLibraryExportDownload>;
+  importLibrary: (
+    document: PromptLibraryExport,
+    onConflict?: PromptLibraryImportMode,
+  ) => Promise<PromptLibraryImportResult>;
   createCategory: (input: {
     libraryId: string;
     name: string;
@@ -113,6 +122,23 @@ export function usePromptLibrary(): PromptLibraryState {
   const deleteLibrary = useCallback(
     async (libraryId: string) => {
       const result = await api.deletePromptLibrary(libraryId);
+      await reload();
+      return result;
+    },
+    [reload],
+  );
+
+  // Export reads only; nothing to reload.
+  const exportLibrary = useCallback(
+    (libraryId: string) => api.exportPromptLibrary(libraryId),
+    [],
+  );
+
+  // An import may create a library or add to any existing one, so the whole
+  // set is refetched like after a restore.
+  const importLibrary = useCallback(
+    async (document: PromptLibraryExport, onConflict?: PromptLibraryImportMode) => {
+      const result = await api.importPromptLibrary(document, onConflict);
       await reload();
       return result;
     },
@@ -249,6 +275,8 @@ export function usePromptLibrary(): PromptLibraryState {
     createLibrary,
     renameLibrary,
     deleteLibrary,
+    exportLibrary,
+    importLibrary,
     createCategory,
     updateCategory,
     deleteCategory,

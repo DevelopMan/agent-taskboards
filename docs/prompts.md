@@ -146,6 +146,90 @@ defaults. A same-named user row is adopted when its default key is missing,
 which upgrades databases created before that key was introduced without
 creating a duplicate.
 
+## Import and Export
+
+A library can be downloaded as one JSON file and a file can be imported back,
+on this machine or another. One file holds exactly one library. Export is
+available from the `Export` button in the Prompt Manager topbar (the selected
+library) and from the download icon on every library pill, Default included;
+`Import` opens a file picker next to it.
+
+### File format
+
+```json
+{
+  "format": "taskboards-prompt-library",
+  "version": 1,
+  "exportedAt": "2026-09-28T12:00:00.000Z",
+  "library": { "name": "Team", "metadata": {} },
+  "categories": [
+    { "name": "Planning", "description": null, "metadata": {} }
+  ],
+  "prompts": [
+    {
+      "name": "Plan a task",
+      "body": "...",
+      "note": null,
+      "metadata": {},
+      "categories": ["Planning"]
+    }
+  ]
+}
+```
+
+Only content and metadata are exported: library `name` and `metadata`;
+category `name`, `description`, and `metadata`; prompt `name`, `body`,
+`note`, `metadata`, and the names of its categories. Array order is position
+order and `prompt.categories` order is the link order, so there is no
+`position` field. Ids, timestamps, `defaultKey`, `usageCount`, and
+`lastUsedAt` are not written, and every row an import creates is a plain user
+row with counters at zero and no default key. `exportedAt` is informational.
+The download is named `<library-name-slug>.prompt-library.json`.
+
+### Import rules
+
+The whole file is validated first and then written in one transaction, so a
+bad file or a conflict changes nothing. The file's library name (trimmed;
+"Default" in any casing means the Default library) decides what happens:
+
+- No library has that name: a new library is created at the end of the pills
+  row with the file's categories, prompts, and links in file order.
+- The name is taken: the Prompt Manager asks how to proceed.
+  - **Append** adds the categories and prompts whose names are missing from
+    the target and skips the rest, so importing the same file twice is a
+    no-op.
+  - **Append and replace** does the same for missing rows and overwrites
+    matched prompts in place: `body`, `note`, `metadata`, and the category
+    links come from the file, while `position`, `usageCount`, `lastUsedAt`,
+    and `defaultKey` stay. Matched categories get the file's `description`
+    and `metadata`.
+  - **Import as copy** creates a separate library named `<name> (2)`, or the
+    smallest free number from 2 upward. An existing trailing number is never
+    parsed: importing "Team (2)" over an existing "Team (2)" gives
+    "Team (2) (2)".
+
+Categories are matched by exact name inside the target library; missing ones
+are created at the end in file order. Neither append nor replace ever deletes
+or reorders rows the file does not mention, and the target library's own
+`metadata` is left alone.
+
+Append and replace identify prompts by name, so they refuse a file or a target
+library in which two prompts share a name. The dialog names the duplicates;
+rename them or import as a copy, which has no such rule. Duplicate category
+names inside a file are always rejected.
+
+All three modes may target Default. Append adds user rows to it, which manual
+creation already allows. Replace edits matched default prompts and categories
+in place and keeps their default keys, so `Restore defaults` still reverts
+them. A file exported from Default and imported as a copy becomes
+"Default (2)" without default keys.
+
+A file that is not valid JSON or not a prompt library export is refused in
+the browser before any request. Everything finer (blank names, empty bodies,
+unknown category names on a prompt) is refused by the API with the failing
+path. The file name and its library name are not related: users rename the
+library through its pill afterwards.
+
 ## Prompt Picker
 
 The prompt picker opens from a toggle in the task detail header and extends

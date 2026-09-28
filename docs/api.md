@@ -816,6 +816,84 @@ Default returns `400 invalid_request`.
 }
 ```
 
+### `GET /api/prompt-libraries/:libraryId/export`
+
+Returns the library as the export document described in `docs/prompts.md`,
+with `Content-Type: application/json` and
+`Content-Disposition: attachment; filename="<slug>.prompt-library.json"`. Ids,
+timestamps, default keys, and usage counters are not part of it, so Default
+exports like any other library. An unknown library returns `404 not_found`.
+
+```json
+{
+  "format": "taskboards-prompt-library",
+  "version": 1,
+  "exportedAt": "2026-09-28T12:00:00.000Z",
+  "library": { "name": "Team", "metadata": {} },
+  "categories": [{ "name": "Planning", "description": null, "metadata": {} }],
+  "prompts": [
+    {
+      "name": "Plan a task",
+      "body": "...",
+      "note": null,
+      "metadata": {},
+      "categories": ["Planning"]
+    }
+  ]
+}
+```
+
+### `POST /api/prompt-libraries/import`
+
+Takes an export document as the JSON body, plus an optional `onConflict` of
+`"append"`, `"replace"`, or `"copy"`. This route accepts bodies up to 5 MB;
+the rest of the API keeps the 100 KB default, and a larger body returns
+`413 invalid_request`. Missing `metadata`, `description`, and `note` default
+to `{}` and `null`; `exportedAt` is ignored.
+
+The whole document is validated, then written in one transaction; any
+failure writes nothing. Shape failures return `400 invalid_request` with the
+zod `issues` in `details`: unknown `format`, a `version` other than `1`, a
+blank library, category, or prompt name, an empty prompt body, duplicate
+category names, a prompt category that is not listed in `categories`, the
+same category twice on one prompt, `metadata` that is not an object, or an
+`onConflict` outside the three values.
+
+When no library has the file's name (trimmed; "Default" in any casing
+matches the Default library), a new library is created at the end of the
+list and `onConflict` is ignored. When the name is taken:
+
+- without `onConflict`: `409 invalid_state` with
+  `details: { "conflict": "library_exists", "libraryId": "...", "name": "..." }`
+- `"copy"`: a new library named `<name> (n)` with the smallest free `n >= 2`
+- `"append"`: categories and prompts whose names are missing from the target
+  are added after its last position, in file order; matched prompts are
+  skipped
+- `"replace"`: like append, and matched prompts get the file's `body`,
+  `note`, `metadata`, and category links while keeping their id, position,
+  usage counters, and `defaultKey`; matched categories get the file's
+  `description` and `metadata`
+
+`append` and `replace` require prompt names to be unique in the file and in
+the target library, and otherwise return `409 invalid_state` with
+`details: { "conflict": "ambiguous_prompt_names", "inFile": [...], "inLibrary": [...] }`.
+Neither mode deletes or reorders rows the file does not mention.
+
+The response is `201` for a created library (`mode` `"create"` or `"copy"`)
+and `200` for a merge (`"append"` or `"replace"`); `library` is the created
+or target library. `updated` is all zeros outside `replace`, and `skipped` is
+nonzero only in `append`.
+
+```json
+{
+  "library": { "id": "...", "name": "Team", "isDefault": false },
+  "mode": "append",
+  "created": { "categories": 1, "prompts": 4 },
+  "updated": { "categories": 0, "prompts": 0 },
+  "skipped": { "prompts": 3 }
+}
+```
+
 ### `GET /api/prompt-categories`
 
 Lists categories ordered by `position`, then `name`. Each category includes
