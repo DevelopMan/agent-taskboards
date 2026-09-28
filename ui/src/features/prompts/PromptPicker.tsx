@@ -61,6 +61,9 @@ export function PromptPicker({
   const [dropTargetRowKey, setDropTargetRowKey] = useState<string | null>(null);
   const [parentTaskValue, setParentTaskValue] = useState<string | null>(null);
   const copiedBlinkTimeout = useRef<number | null>(null);
+  // Bumped on every library switch so a clipboard write that settles after
+  // the switch leaves the new library's copy feedback alone.
+  const librarySwitchCount = useRef(0);
 
   const parentTaskId = useMemo(
     () => resolveParentTaskId(task)?.taskId ?? null,
@@ -145,7 +148,17 @@ export function PromptPicker({
   const copyPrompt = async (prompt: Prompt, rowKey: string) => {
     setCopyError(null);
     const rendered = renderPromptBody(prompt.body, tokenValues);
-    if (!(await copyTextToClipboard(rendered))) {
+    const switchCount = librarySwitchCount.current;
+    const copied = await copyTextToClipboard(rendered);
+    if (copied) {
+      void library.recordPromptUse(prompt.id).catch(() => {
+        // Usage tracking is best-effort; the copy already succeeded.
+      });
+    }
+    if (switchCount !== librarySwitchCount.current) {
+      return;
+    }
+    if (!copied) {
       setCopyError("Unable to copy the prompt to the clipboard");
       return;
     }
@@ -158,9 +171,6 @@ export function PromptPicker({
       () => setCopiedRowKey(null),
       850,
     );
-    void library.recordPromptUse(prompt.id).catch(() => {
-      // Usage tracking is best-effort; the copy already succeeded.
-    });
   };
 
   // The selected pill scopes everything below it. A remembered id that no
@@ -191,6 +201,7 @@ export function PromptPicker({
     if (target.id === libraryId) {
       return;
     }
+    librarySwitchCount.current += 1;
     setSelectedLibraryId(target.id);
     persistLibraryId(promptPickerLibraryStorageKey, target.id);
     if (copiedBlinkTimeout.current) {
@@ -204,7 +215,7 @@ export function PromptPicker({
     setDropTargetRowKey(null);
   };
 
-  // Dragging writes the library's one global order, so it is suppressed while
+  // Dragging writes the selected library's order, so it is suppressed while
   // the filter hides rows: the resulting order would be hard to predict.
   const reorderEnabled = !query.trim();
 
