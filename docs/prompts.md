@@ -151,8 +151,8 @@ creating a duplicate.
 A library can be downloaded as one JSON file and a file can be imported back,
 on this machine or another. One file holds exactly one library. Export is
 available from the `Export` button in the Prompt Manager topbar (the selected
-library) and from the download icon on every library pill, Default included;
-`Import` opens a file picker next to it.
+library) and from the export (upload) icon on every library pill, Default
+included; `Import` opens a file picker next to it.
 
 ### File format
 

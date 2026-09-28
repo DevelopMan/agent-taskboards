@@ -9,7 +9,7 @@ Important changes to Agent Taskboards are documented in this file.
 - **Prompt library import and export** (`import-and-export-prompt-3ksuvl`):
   A prompt library can be downloaded as one JSON file
   (`GET /api/prompt-libraries/:libraryId/export`, also from the `Export`
-  button and a download icon on every library pill) and a file can be
+  button and an export icon on every library pill) and a file can be
   imported (`POST /api/prompt-libraries/import`, the `Import` button). The
   file carries only content and metadata, never ids, default keys, or usage
   counters. Importing a file whose library name is taken asks whether to

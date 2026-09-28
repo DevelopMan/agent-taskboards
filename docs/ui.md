@@ -156,9 +156,9 @@ from the sidebar `Prompts` entry, between Search and Maintenance:
   rendered only while the Default library is selected
 - `Export` in the topbar downloads the selected library as
   `<name-slug>.prompt-library.json`; every pill, Default included, also
-  carries a download icon, shown like the delete `x` on hover or focus and
-  always keyboard-reachable, that exports that pill's library without
-  selecting it
+  carries an export (upload) icon, shown like the delete `x` on hover or
+  focus and always keyboard-reachable, that exports that pill's library
+  without selecting it; `Import` uses the download icon
 - `Import` in the topbar opens a file picker; because a successful import
   selects the imported library, the button obeys the unsaved-changes rule. A
   file that is not a prompt library export is refused in place. When the

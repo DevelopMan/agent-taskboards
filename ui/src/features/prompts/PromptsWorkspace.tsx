@@ -697,7 +697,7 @@ export function PromptsWorkspace() {
           <>
             <Button
               disabled={library.loading || !selectedLibrary || exportingLibraryId !== null}
-              icon={<Icon name="download" />}
+              icon={<Icon name="upload" />}
               onClick={() => {
                 if (selectedLibrary) {
                   void exportLibrary(selectedLibrary);
@@ -710,7 +710,7 @@ export function PromptsWorkspace() {
             </Button>
             <Button
               disabled={library.loading || importing}
-              icon={<Icon name="upload" />}
+              icon={<Icon name="download" />}
               onClick={startImport}
               title="Import a prompt library JSON file"
               variant="ghost"
@@ -805,7 +805,7 @@ export function PromptsWorkspace() {
                 title="Export library as JSON"
                 type="button"
               >
-                <Icon name="download" size={10} />
+                <Icon name="upload" size={10} />
               </button>
               {!item.isDefault && (
                 <button
