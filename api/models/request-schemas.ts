@@ -162,9 +162,24 @@ const promptBodySchema = z
     message: "Body cannot be empty",
   });
 
+// Library names are trimmed and checked for the reserved "Default" name by the
+// service, which owns the rules for both create and rename.
+export const promptLibraryCreateSchema = z.object({
+  name: requiredString,
+});
+
+export const promptLibraryUpdateSchema = promptLibraryCreateSchema;
+
 // Prompts and categories belong to exactly one library, chosen at creation.
-// The update schemas omit `libraryId` because rows never move between
-// libraries.
+// Rows never move between libraries, so an update that names a library is
+// refused instead of being stripped like other unknown keys.
+const immutableLibraryIdSchema = {
+  libraryId: z.undefined({
+    invalid_type_error:
+      "libraryId cannot be changed; prompts and categories stay in the library they were created in",
+  }),
+};
+
 export const promptCategoryCreateSchema = z.object({
   libraryId: requiredString,
   name: requiredString,
@@ -174,7 +189,12 @@ export const promptCategoryCreateSchema = z.object({
 
 export const promptCategoryUpdateSchema = promptCategoryCreateSchema
   .omit({ libraryId: true })
-  .partial();
+  .partial()
+  .extend(immutableLibraryIdSchema);
+
+export const promptCategoryListQuerySchema = z.object({
+  libraryId: requiredString.optional(),
+});
 
 export const promptCreateSchema = z.object({
   libraryId: requiredString,
@@ -187,7 +207,8 @@ export const promptCreateSchema = z.object({
 
 export const promptUpdateSchema = promptCreateSchema
   .omit({ libraryId: true })
-  .partial();
+  .partial()
+  .extend(immutableLibraryIdSchema);
 
 export const promptListQuerySchema = z.object({
   libraryId: requiredString.optional(),
@@ -225,8 +246,11 @@ export type TaskMoveInput = z.infer<typeof taskMoveSchema>;
 export type CommentCreateInput = z.infer<typeof commentCreateSchema>;
 export type ActivityQuery = z.infer<typeof activityQuerySchema>;
 export type SearchInput = z.infer<typeof searchSchema>;
+export type PromptLibraryCreateInput = z.infer<typeof promptLibraryCreateSchema>;
+export type PromptLibraryUpdateInput = z.infer<typeof promptLibraryUpdateSchema>;
 export type PromptCategoryCreateInput = z.infer<typeof promptCategoryCreateSchema>;
 export type PromptCategoryUpdateInput = z.infer<typeof promptCategoryUpdateSchema>;
+export type PromptCategoryListQuery = z.infer<typeof promptCategoryListQuerySchema>;
 export type PromptCreateInput = z.infer<typeof promptCreateSchema>;
 export type PromptUpdateInput = z.infer<typeof promptUpdateSchema>;
 export type PromptListQuery = z.infer<typeof promptListQuerySchema>;

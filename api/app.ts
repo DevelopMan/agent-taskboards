@@ -22,6 +22,9 @@ export function createApp({
     embeddingModel,
     taskIdSuffixGenerator,
   });
+  // Seeds the Default prompt library from the shipped catalog when it is
+  // empty, so the server and every route test start from the same library.
+  services.prompts.ensureDefaultLibrary();
 
   app.use(express.json());
   app.use("/uploads", express.static(getUploadsPath()));

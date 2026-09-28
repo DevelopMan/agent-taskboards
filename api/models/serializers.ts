@@ -6,12 +6,14 @@ import type {
   Project,
   Prompt,
   PromptCategory,
+  PromptLibrary,
   Task,
   TaskActivity,
   TaskAttachment,
   TaskComment,
 } from "../db/schema.js";
 import type { ProjectActivityFeedItem } from "../services/activity-service.js";
+import { isDefaultLibrary } from "../services/prompt-service.js";
 
 export function serializeProject(project: Project) {
   return {
@@ -203,9 +205,23 @@ export function serializeAgentAttachment(attachment: TaskAttachment) {
   };
 }
 
+export function serializePromptLibrary(library: PromptLibrary) {
+  return {
+    id: library.id,
+    name: library.name,
+    position: library.position,
+    defaultKey: library.defaultKey,
+    isDefault: isDefaultLibrary(library),
+    metadata: library.metadata,
+    createdAt: serializeDate(library.createdAt),
+    updatedAt: serializeDate(library.updatedAt),
+  };
+}
+
 export function serializePromptCategory(category: PromptCategory) {
   return {
     id: category.id,
+    libraryId: category.libraryId,
     name: category.name,
     description: category.description,
     position: category.position,
@@ -219,6 +235,7 @@ export function serializePromptCategory(category: PromptCategory) {
 export function serializePrompt(prompt: Prompt, categoryIds: string[]) {
   return {
     id: prompt.id,
+    libraryId: prompt.libraryId,
     name: prompt.name,
     body: prompt.body,
     note: prompt.note,

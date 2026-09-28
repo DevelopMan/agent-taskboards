@@ -15,8 +15,10 @@ import {
 } from "../models/default-prompts.js";
 import type {
   PromptCategoryCreateInput,
+  PromptCategoryListQuery,
   PromptCategoryUpdateInput,
   PromptCreateInput,
+  PromptLibraryCreateInput,
   PromptListQuery,
   PromptUpdateInput,
 } from "../models/request-schemas.js";
@@ -36,14 +38,6 @@ export const DEFAULT_PROMPT_LIBRARY_NAME = "Default";
 export interface PromptWithCategories {
   prompt: Prompt;
   categoryIds: string[];
-}
-
-export interface PromptLibraryCreateInput {
-  name: string;
-}
-
-export interface PromptCategoryListQuery {
-  libraryId?: string;
 }
 
 export interface PromptLibraryDeletion {
@@ -928,7 +922,7 @@ export class PromptService {
   }
 }
 
-function isDefaultLibrary(library: PromptLibrary) {
+export function isDefaultLibrary(library: PromptLibrary) {
   return library.defaultKey === DEFAULT_PROMPT_LIBRARY_KEY;
 }
 

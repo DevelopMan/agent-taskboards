@@ -2,8 +2,11 @@ import type { Express } from "express";
 import { parseBody, parseNonEmptyBody, parseQuery } from "../http/validation.js";
 import {
   promptCategoryCreateSchema,
+  promptCategoryListQuerySchema,
   promptCategoryUpdateSchema,
   promptCreateSchema,
+  promptLibraryCreateSchema,
+  promptLibraryUpdateSchema,
   promptListQuerySchema,
   promptReorderSchema,
   promptUpdateSchema,
@@ -11,12 +14,41 @@ import {
 import {
   serializePrompt,
   serializePromptCategory,
+  serializePromptLibrary,
 } from "../models/serializers.js";
 import type { ApiServices } from "../services/index.js";
 
 export function registerPromptRoutes(app: Express, services: ApiServices) {
-  app.get("/api/prompt-categories", (_req, res) => {
-    const categories = services.prompts.listCategories();
+  app.get("/api/prompt-libraries", (_req, res) => {
+    const libraries = services.prompts.listLibraries();
+    res.json({ libraries: libraries.map(serializePromptLibrary) });
+  });
+
+  app.post("/api/prompt-libraries", (req, res) => {
+    const body = parseBody(req, promptLibraryCreateSchema);
+    const library = services.prompts.createLibrary(body);
+    res.status(201).json({ library: serializePromptLibrary(library) });
+  });
+
+  app.patch("/api/prompt-libraries/:libraryId", (req, res) => {
+    const body = parseBody(req, promptLibraryUpdateSchema);
+    const library = services.prompts.renameLibrary(
+      req.params.libraryId,
+      body.name,
+    );
+    res.json({ library: serializePromptLibrary(library) });
+  });
+
+  app.delete("/api/prompt-libraries/:libraryId", (req, res) => {
+    const { library, deleted } = services.prompts.deleteLibrary(
+      req.params.libraryId,
+    );
+    res.json({ library: serializePromptLibrary(library), deleted });
+  });
+
+  app.get("/api/prompt-categories", (req, res) => {
+    const query = parseQuery(req, promptCategoryListQuerySchema);
+    const categories = services.prompts.listCategories(query);
     res.json({ categories: categories.map(serializePromptCategory) });
   });
 
@@ -71,6 +103,7 @@ export function registerPromptRoutes(app: Express, services: ApiServices) {
     const result = services.prompts.restoreDefaults();
     res.json({
       restored: result.restored,
+      library: serializePromptLibrary(result.library),
       categories: result.categories.map(serializePromptCategory),
       prompts: result.prompts.map(({ prompt, categoryIds }) =>
         serializePrompt(prompt, categoryIds),

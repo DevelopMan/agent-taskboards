@@ -745,20 +745,94 @@ board, and project when indexed.
 ## Prompt Library
 
 Prompts and prompt categories are global resources for the prompt library and
-prompt picker UI. They are not scoped to projects or boards. See
-`docs/prompts.md` for the product behavior and token contract.
+prompt picker UI: they are not scoped to projects or boards. They are grouped
+into prompt libraries, and every prompt and category belongs to exactly one
+library, chosen at creation. See `docs/prompts.md` for the product behavior
+and token contract.
 
-### `GET /api/prompt-categories`
+Library rules:
 
-Lists all categories ordered by `position`, then `name`.
+- The Default library (`defaultKey: "default"`, `isDefault: true`) holds the
+  shipped catalog. The API seeds it on startup when it is empty. It cannot be
+  renamed or deleted, and no other library may be named "Default" (compared
+  trimmed and case-insensitively).
+- Library names are trimmed, free-form (emoji allowed), and unique; a
+  duplicate returns `409 invalid_state`.
+- `libraryId` is immutable. `PATCH` on a prompt or category that names
+  `libraryId`, even with its current value, returns `400 invalid_request`.
+  Moving rows between libraries is not supported.
+- A prompt links only to categories in its own library. A `categoryIds`
+  entry from another library returns `400 invalid_request`.
+- Category names are unique per library. Prompt order and category order are
+  per library, and reorders rewrite only the moved row's library.
 
-### `POST /api/prompt-categories`
+### `GET /api/prompt-libraries`
 
-Creates a category. Names are free-form (emoji allowed) but must be unique;
-a duplicate name returns `409 invalid_state`.
+Lists libraries ordered by `position`, then `name`. Default comes first.
 
 ```json
 {
+  "libraries": [
+    {
+      "id": "prompt-library-default",
+      "name": "Default",
+      "position": 0,
+      "defaultKey": "default",
+      "isDefault": true,
+      "metadata": {},
+      "createdAt": "2026-09-28T12:00:00.000Z",
+      "updatedAt": "2026-09-28T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+### `POST /api/prompt-libraries`
+
+Creates a library at the end of the list and returns `201` with
+`{ library }`. A name equal to "Default" returns `400 invalid_request`.
+
+```json
+{
+  "name": "🧪 Experiments"
+}
+```
+
+### `PATCH /api/prompt-libraries/:libraryId`
+
+Renames the library with `{ "name": "..." }` and returns `{ library }`. The
+same name rules apply. Renaming Default returns `400 invalid_request`.
+
+### `DELETE /api/prompt-libraries/:libraryId`
+
+Hard-deletes the library with all of its categories, prompts, and category
+links, and returns the deleted library with the counts removed. Deleting
+Default returns `400 invalid_request`.
+
+```json
+{
+  "library": {},
+  "deleted": { "prompts": 3, "categories": 2 }
+}
+```
+
+### `GET /api/prompt-categories`
+
+Lists categories ordered by `position`, then `name`. Each category includes
+its `libraryId`. Query parameters:
+
+- `libraryId`: only categories in that library. An unknown library returns
+  `404 not_found`. When omitted, categories from every library are returned.
+
+### `POST /api/prompt-categories`
+
+Creates a category in `libraryId`, which is required. An unknown library
+returns `404 not_found`. Names are free-form (emoji allowed) but must be
+unique within the library; a duplicate name returns `409 invalid_state`.
+
+```json
+{
+  "libraryId": "prompt-library-default",
   "name": "☂️ Umbrella",
   "description": "optional"
 }
@@ -766,17 +840,17 @@ a duplicate name returns `409 invalid_state`.
 
 ### `PATCH /api/prompt-categories/:categoryId`
 
-Updates `name` and/or `description`.
+Updates `name` and/or `description`. `libraryId` is rejected.
 
 ### `DELETE /api/prompt-categories/:categoryId`
 
 Hard-deletes the category and its prompt links. Prompts survive and fall back
-to the root level.
+to the root level of their library.
 
 ### `POST /api/prompt-categories/:categoryId/reorder`
 
-Moves the category to `position` in the category list and returns it. Same
-semantics as the prompt reorder below.
+Moves the category to `position` in its library's category list and returns
+it. Same semantics as the prompt reorder below.
 
 ```json
 {
@@ -787,20 +861,24 @@ semantics as the prompt reorder below.
 ### `GET /api/prompts`
 
 Lists prompts ordered by `position`, then `name`. Each prompt includes its
-`categoryIds`. Query parameters:
+`libraryId` and `categoryIds`. Query parameters:
 
+- `libraryId`: only prompts in that library. An unknown library returns
+  `404 not_found`. When omitted, prompts from every library are returned.
 - `categoryId`: only prompts linked to that category.
 - `q`: case-insensitive substring match on name and body. The `note` is not
   matched.
 
 ### `POST /api/prompts`
 
-Creates a prompt. `categoryIds` is optional; an empty or missing list makes a
-root-level prompt. `note` is the optional author's note: omit it or send
+Creates a prompt in `libraryId`, which is required. An unknown library
+returns `404 not_found`. `categoryIds` is optional; an empty or missing list
+makes a root-level prompt, and every id must belong to the same library. `note` is the optional author's note: omit it or send
 `null` for no note; an empty string is rejected with `400 invalid_request`.
 
 ```json
 {
+  "libraryId": "prompt-library-default",
   "name": "☂️ Umbrella Task Implement",
   "body": "...prompt text with {{TASK}} tokens...",
   "note": "optional help text from the prompt's author",
@@ -816,7 +894,8 @@ Returns one prompt with its `categoryIds`.
 
 Updates `name`, `body`, `note`, and/or `categoryIds`. When `categoryIds` is
 supplied it replaces the entire link set; when omitted, links are unchanged.
-`note: null` clears the note; `note: ""` is rejected.
+`note: null` clears the note; `note: ""` is rejected. `libraryId` is
+rejected, and `categoryIds` must stay within the prompt's library.
 
 ### `DELETE /api/prompts/:promptId`
 
@@ -824,9 +903,10 @@ Hard-deletes the prompt and its category links.
 
 ### `POST /api/prompts/:promptId/reorder`
 
-Moves the prompt to `position` in the single global prompt order and returns
-it. Prompts have one order; a category view is only a projection of it, so
-reordering from inside a category rewrites the same list.
+Moves the prompt to `position` in its library's prompt order and returns it.
+Each library has one prompt order; a category view is only a projection of
+it, so reordering from inside a category rewrites the same list. Other
+libraries are untouched.
 
 ```json
 {
@@ -849,16 +929,21 @@ calls this when a prompt is copied from the prompt picker.
 
 ### `POST /api/prompts/restore-defaults`
 
-Reconciles default prompts and categories to the shipped catalog, keyed on
-their stable `defaultKey`. It restores exact names, bodies, notes, order, and
-category links; removes obsolete system defaults; and preserves user-created
-rows. Same-named rows without a default key are adopted to avoid duplicates
-when an existing database gains a new system default. Repeated calls are
-idempotent.
+Reconciles the Default library's prompts and categories to the shipped
+catalog, keyed on their stable `defaultKey`. It restores exact names, bodies,
+notes, order, and category links; removes obsolete system defaults; and
+preserves user-created rows inside Default, ordered after the system
+defaults. Same-named rows in Default without a default key are adopted to
+avoid duplicates when an existing database gains a new system default. Other
+libraries are never read or written. Repeated calls are idempotent.
+
+The response carries the Default library and its full category and prompt
+lists after the reconcile:
 
 ```json
 {
   "restored": ["prompt:task-implementation"],
+  "library": { "id": "prompt-library-default", "isDefault": true },
   "categories": [],
   "prompts": []
 }

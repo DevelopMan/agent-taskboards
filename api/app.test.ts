@@ -30,7 +30,11 @@ import {
   defaultPromptCategories,
   defaultPrompts,
 } from "./models/default-prompts.js";
+import { DEFAULT_PROMPT_LIBRARY_ID } from "./services/prompt-service.js";
 import { createFakeEmbeddingModel } from "./testing/fake-embedding-model.js";
+
+// Inserted by 0007_prompt_libraries.sql, which moves the 0006 seed into it.
+const CUSTOM_PROMPT_LIBRARY_ID = "prompt-library-custom";
 
 describe("starter API", () => {
   let tmpDir: string | undefined;
@@ -140,12 +144,56 @@ describe("starter API", () => {
     expect(arrayProp(response.body, "projects")).toEqual([]);
   });
 
-  // Skipped until "Prompt libraries 2/7" (task prompt-libraries-2-7-ffn2ln)
-  // rewires PromptService for the library_id column that
-  // 0007_prompt_libraries.sql added; the seeded default keys are cleared and
-  // prompt creation needs a library. The HTTP layer follows in step 3.
-  it.skip("manages the prompt library through the REST routes", async () => {
-    const seededPrompts = await api("GET", "/api/prompts");
+  it("lists the Default and Custom prompt libraries after startup", async () => {
+    const response = await api("GET", "/api/prompt-libraries");
+    expect(response.status).toBe(200);
+    const libraries = arrayProp(response.body, "libraries").map(asObject);
+    expect(libraries.map((library) => stringProp(library, "id"))).toEqual([
+      DEFAULT_PROMPT_LIBRARY_ID,
+      CUSTOM_PROMPT_LIBRARY_ID,
+    ]);
+    expect(stringProp(libraries[0], "name")).toBe("Default");
+    expect(stringProp(libraries[0], "defaultKey")).toBe("default");
+    expect(booleanProp(libraries[0], "isDefault")).toBe(true);
+    expect(stringProp(libraries[1], "name")).toBe("Custom");
+    expect(libraries[1].defaultKey).toBeNull();
+    expect(booleanProp(libraries[1], "isDefault")).toBe(false);
+
+    // createApp seeds Default from the catalog; the 0006 seed rows were moved
+    // into Custom without their default keys.
+    const defaultPromptsResponse = await api(
+      "GET",
+      `/api/prompts?libraryId=${DEFAULT_PROMPT_LIBRARY_ID}`,
+    );
+    expect(
+      arrayProp(defaultPromptsResponse.body, "prompts").map((item) =>
+        stringProp(asObject(item), "defaultKey"),
+      ),
+    ).toEqual(defaultPrompts.map((prompt) => prompt.defaultKey));
+
+    const customPrompts = arrayProp(
+      (await api("GET", `/api/prompts?libraryId=${CUSTOM_PROMPT_LIBRARY_ID}`))
+        .body,
+      "prompts",
+    ).map(asObject);
+    expect(customPrompts.length).toBeGreaterThan(0);
+    expect(
+      customPrompts.every(
+        (prompt) =>
+          prompt.defaultKey === null &&
+          prompt.libraryId === CUSTOM_PROMPT_LIBRARY_ID,
+      ),
+    ).toBe(true);
+
+    const allPrompts = arrayProp((await api("GET", "/api/prompts")).body, "prompts");
+    expect(allPrompts).toHaveLength(defaultPrompts.length + customPrompts.length);
+  });
+
+  it("manages the prompt library through the REST routes", async () => {
+    const seededPrompts = await api(
+      "GET",
+      `/api/prompts?libraryId=${DEFAULT_PROMPT_LIBRARY_ID}`,
+    );
     expect(seededPrompts.status).toBe(200);
     expect(
       arrayProp(seededPrompts.body, "prompts").map((item) =>
@@ -153,30 +201,56 @@ describe("starter API", () => {
       ),
     ).toEqual(defaultPrompts.map((prompt) => prompt.defaultKey));
 
-    const seededCategories = await api("GET", "/api/prompt-categories");
+    const seededCategories = await api(
+      "GET",
+      `/api/prompt-categories?libraryId=${DEFAULT_PROMPT_LIBRARY_ID}`,
+    );
     expect(seededCategories.status).toBe(200);
+    const seededCategoryItems = arrayProp(
+      seededCategories.body,
+      "categories",
+    ).map(asObject);
     expect(
-      arrayProp(seededCategories.body, "categories").map((item) =>
-        stringProp(asObject(item), "name"),
-      ),
+      seededCategoryItems.map((category) => stringProp(category, "name")),
     ).toEqual(defaultPromptCategories.map((category) => category.name));
+    expect(
+      seededCategoryItems.every(
+        (category) => category.libraryId === DEFAULT_PROMPT_LIBRARY_ID,
+      ),
+    ).toBe(true);
 
     const categoryResponse = await api("POST", "/api/prompt-categories", {
+      libraryId: DEFAULT_PROMPT_LIBRARY_ID,
       name: "🔧 Fixes",
       description: "Prompts for bug fixing",
     });
     expect(categoryResponse.status).toBe(201);
-    const categoryId = stringProp(
-      objectProp(categoryResponse.body, "category"),
-      "id",
+    const createdCategory = objectProp(categoryResponse.body, "category");
+    const categoryId = stringProp(createdCategory, "id");
+    expect(stringProp(createdCategory, "libraryId")).toBe(
+      DEFAULT_PROMPT_LIBRARY_ID,
     );
 
     const duplicateCategory = await api("POST", "/api/prompt-categories", {
+      libraryId: DEFAULT_PROMPT_LIBRARY_ID,
       name: "🔧 Fixes",
     });
     expect(duplicateCategory.status).toBe(409);
 
+    // Category names are unique per library, not globally.
+    const sameNameElsewhere = await api("POST", "/api/prompt-categories", {
+      libraryId: CUSTOM_PROMPT_LIBRARY_ID,
+      name: "🔧 Fixes",
+    });
+    expect(sameNameElsewhere.status).toBe(201);
+
+    const categoryWithoutLibrary = await api("POST", "/api/prompt-categories", {
+      name: "📦 Orphan",
+    });
+    expect(categoryWithoutLibrary.status).toBe(400);
+
     const promptResponse = await api("POST", "/api/prompts", {
+      libraryId: DEFAULT_PROMPT_LIBRARY_ID,
       name: "Fix the bug",
       body: "Please fix {{TASK}} on the current branch.",
       categoryIds: [categoryId],
@@ -184,13 +258,23 @@ describe("starter API", () => {
     expect(promptResponse.status).toBe(201);
     const createdPrompt = objectProp(promptResponse.body, "prompt");
     const promptId = stringProp(createdPrompt, "id");
+    expect(stringProp(createdPrompt, "libraryId")).toBe(
+      DEFAULT_PROMPT_LIBRARY_ID,
+    );
     expect(arrayProp(createdPrompt, "categoryIds")).toEqual([categoryId]);
 
     const invalidPrompt = await api("POST", "/api/prompts", {
+      libraryId: DEFAULT_PROMPT_LIBRARY_ID,
       name: "No body",
       body: "   ",
     });
     expect(invalidPrompt.status).toBe(400);
+
+    const promptWithoutLibrary = await api("POST", "/api/prompts", {
+      name: "No library",
+      body: "Body",
+    });
+    expect(promptWithoutLibrary.status).toBe(400);
 
     const filtered = await api("GET", `/api/prompts?categoryId=${categoryId}`);
     expect(
@@ -247,6 +331,32 @@ describe("starter API", () => {
     expect(arrayProp(restoreResponse.body, "restored")).toEqual([
       `prompt:${defaultPrompts[0].defaultKey}`,
     ]);
+    const restoredLibrary = objectProp(restoreResponse.body, "library");
+    expect(stringProp(restoredLibrary, "id")).toBe(DEFAULT_PROMPT_LIBRARY_ID);
+    expect(booleanProp(restoredLibrary, "isDefault")).toBe(true);
+    // The response covers Default only: the catalog plus the user rows kept
+    // inside it, never the Custom library's rows.
+    const restoredPrompts = arrayProp(restoreResponse.body, "prompts").map(
+      asObject,
+    );
+    expect(restoredPrompts).toHaveLength(defaultPrompts.length + 1);
+    expect(
+      restoredPrompts.every(
+        (prompt) => prompt.libraryId === DEFAULT_PROMPT_LIBRARY_ID,
+      ),
+    ).toBe(true);
+    const restoredCategories = arrayProp(
+      restoreResponse.body,
+      "categories",
+    ).map(asObject);
+    expect(
+      restoredCategories.map((category) => stringProp(category, "id")),
+    ).toContain(categoryId);
+    expect(
+      restoredCategories.every(
+        (category) => category.libraryId === DEFAULT_PROMPT_LIBRARY_ID,
+      ),
+    ).toBe(true);
 
     const restoreAgain = await api("POST", "/api/prompts/restore-defaults");
     expect(arrayProp(restoreAgain.body, "restored")).toEqual([]);
@@ -263,15 +373,16 @@ describe("starter API", () => {
     expect(promptAfterCategoryDelete.status).toBe(200);
   });
 
-  // Skipped for the same reason as the prompt library route test above.
-  it.skip("reorders prompts and prompt categories through the REST routes", async () => {
-    const promptIds = async () =>
-      arrayProp((await api("GET", "/api/prompts")).body, "prompts").map((item) =>
-        stringProp(asObject(item), "id"),
-      );
+  it("reorders prompts and prompt categories through the REST routes", async () => {
+    const promptIds = async (libraryId = DEFAULT_PROMPT_LIBRARY_ID) =>
+      arrayProp(
+        (await api("GET", `/api/prompts?libraryId=${libraryId}`)).body,
+        "prompts",
+      ).map((item) => stringProp(asObject(item), "id"));
 
     const seeded = await promptIds();
     expect(seeded).toHaveLength(defaultPrompts.length);
+    const customBefore = await promptIds(CUSTOM_PROMPT_LIBRARY_ID);
 
     const moved = await api("POST", `/api/prompts/${seeded[2]}/reorder`, {
       position: 0,
@@ -284,20 +395,25 @@ describe("starter API", () => {
       seeded[1],
       ...seeded.slice(3),
     ]);
+    // Reorders rewrite the moved row's library only.
+    expect(await promptIds(CUSTOM_PROMPT_LIBRARY_ID)).toEqual(customBefore);
 
     // `position` counts the list without the moved prompt, so this lands on
     // the last slot rather than one before it.
     await api("POST", `/api/prompts/${seeded[2]}/reorder`, { position: 2 });
     expect(await promptIds()).toEqual(seeded);
 
-    const categoryIds = async () =>
+    const categoryIds = async (libraryId = DEFAULT_PROMPT_LIBRARY_ID) =>
       arrayProp(
-        (await api("GET", "/api/prompt-categories")).body,
+        (await api("GET", `/api/prompt-categories?libraryId=${libraryId}`))
+          .body,
         "categories",
       ).map((item) => stringProp(asObject(item), "id"));
 
     const seededCategories = await categoryIds();
+    const customCategoriesBefore = await categoryIds(CUSTOM_PROMPT_LIBRARY_ID);
     const category = await api("POST", "/api/prompt-categories", {
+      libraryId: DEFAULT_PROMPT_LIBRARY_ID,
       name: "🚀 Release",
     });
     const categoryId = stringProp(objectProp(category.body, "category"), "id");
@@ -308,6 +424,9 @@ describe("starter API", () => {
     );
     expect(reorderedCategory.status).toBe(200);
     expect(await categoryIds()).toEqual([categoryId, ...seededCategories]);
+    expect(await categoryIds(CUSTOM_PROMPT_LIBRARY_ID)).toEqual(
+      customCategoriesBefore,
+    );
 
     const negative = await api("POST", `/api/prompts/${seeded[0]}/reorder`, {
       position: -1,
@@ -330,6 +449,236 @@ describe("starter API", () => {
       { position: 0 },
     );
     expect(missingCategory.status).toBe(404);
+  });
+
+  it("creates, renames, and deletes prompt libraries through the REST routes", async () => {
+    const created = await api("POST", "/api/prompt-libraries", {
+      name: "  🧪 Experiments  ",
+    });
+    expect(created.status).toBe(201);
+    const library = objectProp(created.body, "library");
+    const libraryId = stringProp(library, "id");
+    expect(stringProp(library, "name")).toBe("🧪 Experiments");
+    expect(library.defaultKey).toBeNull();
+    expect(booleanProp(library, "isDefault")).toBe(false);
+
+    const listed = await api("GET", "/api/prompt-libraries");
+    expect(
+      arrayProp(listed.body, "libraries").map((item) =>
+        stringProp(asObject(item), "id"),
+      ),
+    ).toEqual([DEFAULT_PROMPT_LIBRARY_ID, CUSTOM_PROMPT_LIBRARY_ID, libraryId]);
+
+    const duplicate = await api("POST", "/api/prompt-libraries", {
+      name: "🧪 Experiments",
+    });
+    expect(duplicate.status).toBe(409);
+
+    for (const name of ["Default", " default ", "DEFAULT"]) {
+      const reserved = await api("POST", "/api/prompt-libraries", { name });
+      expect(reserved.status).toBe(400);
+    }
+
+    const missingName = await api("POST", "/api/prompt-libraries", {});
+    expect(missingName.status).toBe(400);
+
+    const renamed = await api("PATCH", `/api/prompt-libraries/${libraryId}`, {
+      name: "🧪 Lab",
+    });
+    expect(renamed.status).toBe(200);
+    expect(stringProp(objectProp(renamed.body, "library"), "name")).toBe(
+      "🧪 Lab",
+    );
+
+    const renamedToReserved = await api(
+      "PATCH",
+      `/api/prompt-libraries/${libraryId}`,
+      { name: "default" },
+    );
+    expect(renamedToReserved.status).toBe(400);
+
+    const renamedToTaken = await api(
+      "PATCH",
+      `/api/prompt-libraries/${libraryId}`,
+      { name: "Custom" },
+    );
+    expect(renamedToTaken.status).toBe(409);
+
+    const renamedDefault = await api(
+      "PATCH",
+      `/api/prompt-libraries/${DEFAULT_PROMPT_LIBRARY_ID}`,
+      { name: "System" },
+    );
+    expect(renamedDefault.status).toBe(400);
+
+    const renamedMissing = await api(
+      "PATCH",
+      "/api/prompt-libraries/not-a-library",
+      { name: "Anything" },
+    );
+    expect(renamedMissing.status).toBe(404);
+
+    const deletedDefault = await api(
+      "DELETE",
+      `/api/prompt-libraries/${DEFAULT_PROMPT_LIBRARY_ID}`,
+    );
+    expect(deletedDefault.status).toBe(400);
+
+    const deletedMissing = await api(
+      "DELETE",
+      "/api/prompt-libraries/not-a-library",
+    );
+    expect(deletedMissing.status).toBe(404);
+
+    // Fill the new library so the delete has something to cascade over.
+    const categoryIdsFor = async (count: number) => {
+      const ids: string[] = [];
+      for (let index = 0; index < count; index += 1) {
+        const category = await api("POST", "/api/prompt-categories", {
+          libraryId,
+          name: `Category ${index}`,
+        });
+        ids.push(stringProp(objectProp(category.body, "category"), "id"));
+      }
+      return ids;
+    };
+    const labCategoryIds = await categoryIdsFor(2);
+    for (let index = 0; index < 3; index += 1) {
+      const prompt = await api("POST", "/api/prompts", {
+        libraryId,
+        name: `Prompt ${index}`,
+        body: "Look at {{TASK}}.",
+        categoryIds: labCategoryIds,
+      });
+      expect(prompt.status).toBe(201);
+    }
+
+    const deleted = await api("DELETE", `/api/prompt-libraries/${libraryId}`);
+    expect(deleted.status).toBe(200);
+    expect(stringProp(objectProp(deleted.body, "library"), "id")).toBe(
+      libraryId,
+    );
+    expect(objectProp(deleted.body, "deleted")).toEqual({
+      prompts: 3,
+      categories: 2,
+    });
+
+    const afterDelete = await api("GET", "/api/prompt-libraries");
+    expect(
+      arrayProp(afterDelete.body, "libraries").map((item) =>
+        stringProp(asObject(item), "id"),
+      ),
+    ).toEqual([DEFAULT_PROMPT_LIBRARY_ID, CUSTOM_PROMPT_LIBRARY_ID]);
+    const deletedCategory = await api(
+      "PATCH",
+      `/api/prompt-categories/${labCategoryIds[0]}`,
+      { name: "Gone" },
+    );
+    expect(deletedCategory.status).toBe(404);
+  });
+
+  it("keeps prompts and categories inside the library they were created in", async () => {
+    const missingLibraryPrompt = await api("POST", "/api/prompts", {
+      libraryId: "not-a-library",
+      name: "Lost",
+      body: "Body",
+    });
+    expect(missingLibraryPrompt.status).toBe(404);
+
+    const missingLibraryCategory = await api("POST", "/api/prompt-categories", {
+      libraryId: "not-a-library",
+      name: "Lost",
+    });
+    expect(missingLibraryCategory.status).toBe(404);
+
+    const missingLibraryPrompts = await api(
+      "GET",
+      "/api/prompts?libraryId=not-a-library",
+    );
+    expect(missingLibraryPrompts.status).toBe(404);
+
+    const missingLibraryCategories = await api(
+      "GET",
+      "/api/prompt-categories?libraryId=not-a-library",
+    );
+    expect(missingLibraryCategories.status).toBe(404);
+
+    const customCategory = await api("POST", "/api/prompt-categories", {
+      libraryId: CUSTOM_PROMPT_LIBRARY_ID,
+      name: "🧰 Custom tools",
+    });
+    const customCategoryId = stringProp(
+      objectProp(customCategory.body, "category"),
+      "id",
+    );
+
+    // A prompt may only link to categories of its own library.
+    const crossLibraryCreate = await api("POST", "/api/prompts", {
+      libraryId: DEFAULT_PROMPT_LIBRARY_ID,
+      name: "Cross-library",
+      body: "Body",
+      categoryIds: [customCategoryId],
+    });
+    expect(crossLibraryCreate.status).toBe(400);
+
+    const defaultPrompt = await api("POST", "/api/prompts", {
+      libraryId: DEFAULT_PROMPT_LIBRARY_ID,
+      name: "Stays in Default",
+      body: "Body",
+    });
+    const defaultPromptId = stringProp(
+      objectProp(defaultPrompt.body, "prompt"),
+      "id",
+    );
+
+    const crossLibraryUpdate = await api(
+      "PATCH",
+      `/api/prompts/${defaultPromptId}`,
+      { categoryIds: [customCategoryId] },
+    );
+    expect(crossLibraryUpdate.status).toBe(400);
+
+    // libraryId is fixed at creation, so updates naming a library are refused
+    // even when the value is the row's current library.
+    for (const libraryId of [CUSTOM_PROMPT_LIBRARY_ID, DEFAULT_PROMPT_LIBRARY_ID]) {
+      const movedPrompt = await api("PATCH", `/api/prompts/${defaultPromptId}`, {
+        name: "Moved",
+        libraryId,
+      });
+      expect(movedPrompt.status).toBe(400);
+      expect(stringProp(objectProp(movedPrompt.body, "error"), "code")).toBe(
+        "invalid_request",
+      );
+    }
+
+    const movedCategory = await api(
+      "PATCH",
+      `/api/prompt-categories/${customCategoryId}`,
+      { libraryId: DEFAULT_PROMPT_LIBRARY_ID },
+    );
+    expect(movedCategory.status).toBe(400);
+
+    const unchangedPrompt = await api("GET", `/api/prompts/${defaultPromptId}`);
+    const unchanged = objectProp(unchangedPrompt.body, "prompt");
+    expect(stringProp(unchanged, "name")).toBe("Stays in Default");
+    expect(stringProp(unchanged, "libraryId")).toBe(DEFAULT_PROMPT_LIBRARY_ID);
+
+    const customCategories = await api(
+      "GET",
+      `/api/prompt-categories?libraryId=${CUSTOM_PROMPT_LIBRARY_ID}`,
+    );
+    const customCategoryItems = arrayProp(
+      customCategories.body,
+      "categories",
+    ).map(asObject);
+    expect(
+      customCategoryItems.map((category) => stringProp(category, "id")),
+    ).toContain(customCategoryId);
+    expect(
+      customCategoryItems.every(
+        (category) => category.libraryId === CUSTOM_PROMPT_LIBRARY_ID,
+      ),
+    ).toBe(true);
   });
 
   it("creates projects, boards with default columns, tasks, comments, and context", async () => {
