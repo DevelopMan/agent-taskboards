@@ -1,5 +1,6 @@
 import {
   useMemo,
+  useRef,
   useState,
   type DragEvent,
   type KeyboardEvent,
@@ -86,6 +87,10 @@ export function PromptsWorkspace() {
   // elsewhere never leaves the workspace pointing at nothing.
   const selectedLibrary = resolveSelectedLibrary(library.libraries, selectedLibraryId);
   const libraryId = selectedLibrary?.id ?? null;
+  // Async handlers compare against this after awaiting, so a request that
+  // finishes after a library switch does not touch the newly shown library.
+  const libraryIdRef = useRef(libraryId);
+  libraryIdRef.current = libraryId;
   const prompts = useMemo(
     () => promptsInLibrary(library.prompts, libraryId),
     [library.prompts, libraryId],
@@ -286,6 +291,12 @@ export function PromptsWorkspace() {
     setMutationError(null);
     try {
       const category = await library.createCategory({ libraryId, name });
+      // A switch while the request was in flight already reset the form and
+      // filter for the new library; the category landed in the old one, so
+      // nothing here may re-point the view at it.
+      if (libraryIdRef.current !== libraryId) {
+        return;
+      }
       setCreatingCategory(false);
       setNewCategoryName("");
       setFilter({ type: "category", categoryId: category.id });
@@ -333,6 +344,21 @@ export function PromptsWorkspace() {
     }
   };
 
+  // Everything under the pills belongs to one library, so leaving it, whether
+  // by selecting another pill or by deleting it, starts the next library from
+  // a clean slate: All prompts, no draft, no open inline forms.
+  const showLibrary = (nextId: string | null) => {
+    setSelectedLibraryId(nextId);
+    persistLibraryId(promptManagerLibraryStorageKey, nextId);
+    setFilter({ type: "all" });
+    setDraft(null);
+    setNoteEditing(false);
+    setLibraryNameDraft(null);
+    setCategoryNameDraft(null);
+    setCreatingCategory(false);
+    setNewCategoryName("");
+  };
+
   // Every open draft belongs to the current library (new prompts are created
   // in it, and the list only shows its prompts), so a permitted switch always
   // closes the draft. Dirty edits block the switch exactly as they block
@@ -344,15 +370,17 @@ export function PromptsWorkspace() {
     if (draftBlocksSwitching()) {
       return;
     }
-    setSelectedLibraryId(target.id);
-    persistLibraryId(promptManagerLibraryStorageKey, target.id);
-    setFilter({ type: "all" });
-    setDraft(null);
-    setNoteEditing(false);
-    setLibraryNameDraft(null);
-    setCategoryNameDraft(null);
-    setCreatingCategory(false);
-    setNewCategoryName("");
+    showLibrary(target.id);
+  };
+
+  // Creating a library selects it, so the `+` pill answers to the same
+  // unsaved-changes rule as the pills themselves.
+  const startLibraryCreate = () => {
+    if (draftBlocksSwitching()) {
+      return;
+    }
+    setMutationError(null);
+    setLibraryNameDraft({ libraryId: null, name: "" });
   };
 
   const startLibraryRename = (target: PromptLibrary) => {
@@ -376,6 +404,11 @@ export function PromptsWorkspace() {
       : null;
     setLibraryNameDraft(null);
     if (!name || (current && name === current.name)) {
+      return;
+    }
+    // The `+` pill never opens over a dirty draft, but a create that could
+    // not be followed by its selection must not leave the library behind.
+    if (!current && draftBlocksSwitching()) {
       return;
     }
     setMutationError(null);
@@ -610,7 +643,14 @@ export function PromptsWorkspace() {
                 <button
                   aria-label={`Delete library ${item.name}`}
                   className="prompts-library__remove"
-                  onClick={() => setPendingDeleteLibraryId(item.id)}
+                  onClick={() => {
+                    // The open draft lives in the selected library and would
+                    // go with it, uncounted by the confirmation.
+                    if (item.id === libraryId && draftBlocksSwitching()) {
+                      return;
+                    }
+                    setPendingDeleteLibraryId(item.id);
+                  }}
                   title="Delete library"
                   type="button"
                 >
@@ -642,10 +682,7 @@ export function PromptsWorkspace() {
             aria-label="New library"
             className="prompts-libraries__add"
             disabled={library.loading}
-            onClick={() => {
-              setMutationError(null);
-              setLibraryNameDraft({ libraryId: null, name: "" });
-            }}
+            onClick={startLibraryCreate}
             title="New library"
             type="button"
           >
@@ -1041,14 +1078,9 @@ export function PromptsWorkspace() {
             await library.deleteLibrary(pendingDeleteLibrary.id);
             setPendingDeleteLibraryId(null);
             if (pendingDeleteLibrary.id === libraryId) {
-              // The open draft, if any, lived in the deleted library and is
-              // gone with it; nothing here is worth an unsaved-changes stop.
-              const fallback = library.defaultLibrary?.id ?? null;
-              setSelectedLibraryId(fallback);
-              persistLibraryId(promptManagerLibraryStorageKey, fallback);
-              setFilter({ type: "all" });
-              setDraft(null);
-              setNoteEditing(false);
+              // The `x` on the selected pill honours the unsaved-changes rule,
+              // so any draft left here is untouched and free to drop.
+              showLibrary(library.defaultLibrary?.id ?? null);
             }
           }}
           title="Delete library?"

@@ -128,7 +128,8 @@ from the sidebar `Prompts` entry, between Search and Maintenance:
 - a wrapping row of library pills sits under the topbar, one per library in
   position order with the selected one highlighted; it wraps at narrow widths
   rather than scrolling, and a trailing `+` pill turns into an inline name
-  input (Enter creates and selects the library, Escape or blur cancels)
+  input (Enter creates and selects the library, Escape or blur cancels);
+  because creating selects, the `+` pill obeys the unsaved-changes rule below
 - the selected pill scopes everything below it: the rail's categories and
   counts, the All prompts and Uncategorized filters, the prompt list, the
   editor's category checkboxes, drag reorder, and where New prompt and New
@@ -138,8 +139,10 @@ from the sidebar `Prompts` entry, between Search and Maintenance:
   (Enter saves, Escape or blur cancels); the Default pill ignores both and its
   tooltip says it is fixed
 - non-Default pills carry an `x` that opens a confirmation naming the library
-  and the number of prompts and categories that go with it; after the delete
-  the selection moves to Default
+  and the number of saved prompts and categories that go with it; on the
+  selected pill it obeys the unsaved-changes rule, since the open draft would
+  go with the library uncounted; after the delete the selection moves to
+  Default with the same reset as selecting a pill
 - the selected library is remembered in the browser under
   `taskboards.prompts.libraryId` and falls back to Default when the stored id
   no longer exists
