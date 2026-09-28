@@ -45,7 +45,18 @@ export function parsePromptLibraryFile(text: string): ParsedPromptLibraryFile {
   if (!Array.isArray(value.categories) || !Array.isArray(value.prompts)) {
     return { ok: false, error: "The export is missing its categories or prompts list" };
   }
-  return { ok: true, document: value as unknown as PromptLibraryExport };
+  // Only the export fields travel on. In particular a top-level `onConflict`
+  // in the file must not skip the conflict dialog: the mode is the user's
+  // choice, made in the dialog, never the file's.
+  const document = {
+    format: value.format,
+    version: value.version,
+    ...(typeof value.exportedAt === "string" ? { exportedAt: value.exportedAt } : {}),
+    library: value.library,
+    categories: value.categories,
+    prompts: value.prompts,
+  };
+  return { ok: true, document: document as unknown as PromptLibraryExport };
 }
 
 // The client-side twin of the server's name lookup: trimmed exact match,
@@ -74,8 +85,12 @@ export function importSummary(result: PromptLibraryImportResult) {
   if (added.length > 0) {
     parts.push(`${added.join(" and ")} added`);
   }
-  if (result.updated.prompts > 0 || result.updated.categories > 0) {
-    parts.push(`${result.updated.prompts} replaced`);
+  const replaced = [
+    count(result.updated.categories, "category", "categories"),
+    count(result.updated.prompts, "prompt"),
+  ].filter((part): part is string => part !== null);
+  if (replaced.length > 0) {
+    parts.push(`${replaced.join(" and ")} replaced`);
   }
   if (result.skipped.prompts > 0) {
     parts.push(`${result.skipped.prompts} skipped`);

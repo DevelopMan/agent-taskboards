@@ -64,6 +64,17 @@ describe("parsePromptLibraryFile", () => {
     }
   });
 
+  it("drops fields that are not part of the export, onConflict above all", () => {
+    const parsed = parsePromptLibraryFile(
+      JSON.stringify({ ...valid, onConflict: "replace", extra: true }),
+    );
+    expect(parsed).toEqual({ ok: true, document: valid });
+    const withoutDate = parsePromptLibraryFile(
+      JSON.stringify({ ...valid, exportedAt: undefined }),
+    );
+    expect(withoutDate.ok && "exportedAt" in withoutDate.document).toBe(false);
+  });
+
   it("rejects bad JSON, the wrong format, and missing parts without a request", () => {
     expect(parsePromptLibraryFile("{nope")).toEqual({
       ok: false,
@@ -113,7 +124,15 @@ describe("importSummary", () => {
           skipped: { prompts: 0 },
         }),
       ),
-    ).toBe("Imported into “Team”: 1 category and 1 prompt added, 3 replaced");
+    ).toBe(
+      "Imported into “Team”: 1 category and 1 prompt added, 1 category and 3 prompts replaced",
+    );
+  });
+
+  it("reports a category-only replacement", () => {
+    expect(
+      importSummary(result({ mode: "replace", updated: { categories: 2, prompts: 0 } })),
+    ).toBe("Imported into “Team”: 2 categories replaced");
   });
 
   it("says when an append added nothing", () => {

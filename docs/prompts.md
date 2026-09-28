@@ -221,8 +221,10 @@ names inside a file are always rejected.
 All three modes may target Default. Append adds user rows to it, which manual
 creation already allows. Replace edits matched default prompts and categories
 in place and keeps their default keys, so `Restore defaults` still reverts
-them. A file exported from Default and imported as a copy becomes
-"Default (2)" without default keys.
+their bodies, notes, descriptions, and category links. It does not touch
+`metadata`, so metadata written by a replace stays, exactly as metadata set
+through the API does. A file exported from Default and imported as a copy
+becomes "Default (2)" without default keys.
 
 A file that is not valid JSON or not a prompt library export is refused in
 the browser before any request. Everything finer (blank names, empty bodies,

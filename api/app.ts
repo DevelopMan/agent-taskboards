@@ -28,10 +28,14 @@ export function createApp({
   services.prompts.ensureDefaultLibrary();
 
   // The prompt library import route mounts its own, larger JSON parser; the
-  // app-wide one keeps the 100 KB default for every other route.
+  // app-wide one keeps the 100 KB default for every other route. Express
+  // routes case-insensitively and ignores a trailing slash, so the bypass
+  // has to match the same spellings.
   const jsonBody = express.json();
+  const isImportPath = (path: string) =>
+    path.replace(/\/+$/, "").toLowerCase() === promptLibraryImportPath;
   app.use((req, res, next) =>
-    req.path === promptLibraryImportPath ? next() : jsonBody(req, res, next),
+    isImportPath(req.path) ? next() : jsonBody(req, res, next),
   );
   app.use("/uploads", express.static(getUploadsPath()));
   registerRoutes(app, { databaseClient, migrationResult, services });

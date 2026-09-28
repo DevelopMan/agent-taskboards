@@ -503,10 +503,12 @@ export function PromptsWorkspace() {
     importFileInputRef.current?.click();
   };
 
+  // Selecting the library also closes the open prompt, even when the import
+  // landed in the library already on screen: a replace may have rewritten
+  // that prompt, and a draft still holding the old text would look dirty and
+  // would put the old text back on Save.
   const finishImport = (result: PromptLibraryImportResult) => {
-    if (result.library.id !== libraryIdRef.current) {
-      showLibrary(result.library.id);
-    }
+    showLibrary(result.library.id);
     setImportNotice(importSummary(result));
   };
 

@@ -724,6 +724,16 @@ describe("starter API", () => {
       prompts: [{ name: "Big", body: "x".repeat(200 * 1024) }],
     });
     expect(medium.status).toBe(201);
+    // Express accepts a trailing slash and any casing for the same route, so
+    // the larger parser must apply to those spellings too.
+    const mediumVariant = await api("POST", "/API/Prompt-Libraries/Import/", {
+      format: "taskboards-prompt-library",
+      version: 1,
+      library: { name: "Medium variant" },
+      categories: [],
+      prompts: [{ name: "Big", body: "x".repeat(200 * 1024) }],
+    });
+    expect(mediumVariant.status).toBe(201);
     const tooBigElsewhere = await api("POST", "/api/prompt-libraries", {
       name: "x".repeat(200 * 1024),
     });

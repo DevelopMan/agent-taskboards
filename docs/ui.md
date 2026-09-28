@@ -166,9 +166,11 @@ from the sidebar `Prompts` entry, between Search and Maintenance:
   exists` offers `Append`, `Append and replace`, and `Import as copy` (see
   `docs/prompts.md` for what each touches); a failure such as duplicate
   prompt names shows inside the dialog so another mode can be picked. After
-  the import the created or target library is selected and a result line
-  (`Imported into “Team”: 2 categories and 5 prompts added, 3 replaced, 4
-  skipped`) stays in the error slot until the next action
+  the import the created or target library is selected, which also closes
+  any open prompt so a replaced prompt is never shown through a stale draft,
+  and a result line (`Imported into “Team”: 2 categories and 5 prompts added,
+  3 prompts replaced, 4 skipped`) stays in the error slot until the next
+  action
 - prompts and rail categories reorder by dragging, with a drop indicator on the
   side the dragged row will land on; `Alt+Up`/`Alt+Down` on a focused row is the
   pointer-free equivalent, stepping one visible row at a time
