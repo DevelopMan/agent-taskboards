@@ -2,10 +2,11 @@ import { useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEv
 import type { LabelCount, LabelMatchMode } from "../../domain/types";
 import { suggestTags } from "../../lib/task-labels";
 import { Icon, LabelChip } from "./index";
+import { tagTabAction } from "./tag-filter-keys";
 
 // A type-ahead tag field: typing suggests tags in use, Enter or a click adds
-// the highlighted one as a removable chip inside the field, and Backspace in
-// an empty field removes the last chip.
+// the highlighted one as a removable chip inside the field, Tab completes a
+// typed tag, and Backspace in an empty field removes the last chip.
 export function TagFilter({
   labels,
   match,
@@ -47,6 +48,24 @@ export function TagFilter({
       if (suggestions.length > 0) {
         const step = event.key === "ArrowDown" ? 1 : -1;
         setHighlight((activeIndex + step + suggestions.length) % suggestions.length);
+      }
+      return;
+    }
+    if (event.key === "Tab") {
+      const action = tagTabAction({
+        highlight: activeIndex,
+        menuOpen: menuVisible,
+        shift: event.shiftKey,
+        suggestionCount: suggestions.length,
+        text,
+      });
+      const suggestion = suggestions[action.type === "default" ? -1 : action.index];
+      if (action.type === "add" && suggestion) {
+        event.preventDefault();
+        addTag(suggestion.label);
+      } else if (action.type === "highlight") {
+        event.preventDefault();
+        setHighlight(action.index);
       }
       return;
     }

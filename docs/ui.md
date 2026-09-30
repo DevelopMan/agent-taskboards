@@ -132,7 +132,10 @@ The `Tags` filter is a type-ahead field over the labels in use
 (`GET /api/labels`, scoped to the selected project). Typing suggests matching
 tags, prefix matches first, with their task counts. Enter or a click adds the
 highlighted tag as a chip inside the field with an `x` to remove it, and
-Backspace in an empty field removes the last chip. An All/Any match toggle
+Backspace in an empty field removes the last chip. While text is typed and
+suggestions are open, Tab completes: a single suggestion is added, and several
+suggestions are cycled (Shift+Tab goes back); otherwise Tab moves focus as
+usual. An All/Any match toggle
 appears once two tags are picked. Tags alone, with an
 empty text box, list the tagged tasks newest-updated first, with no relevance
 score. Tags together with text keep only tasks carrying the tags and comments

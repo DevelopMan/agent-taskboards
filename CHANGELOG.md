@@ -8,7 +8,8 @@ Important changes to Agent Taskboards are documented in this file.
 
 - **Search by tags** (`add-search-by-tags-2r5elm`): The search view has a
   `Tags` filter: a type-ahead field that suggests tags in use and adds the
-  picked ones as removable chips inside it, with an All/Any match toggle. Tags alone list the tagged tasks
+  picked ones as removable chips inside it (Tab adds a single suggestion or
+  cycles through several), with an All/Any match toggle. Tags alone list the tagged tasks
   and, combined with text, narrow semantic results to tagged tasks and their
   comments. The filter is kept in the URL. The board and list views gain the
   same `Tags` filter in the sub-toolbar. Clicking a tag chip on a card or list
