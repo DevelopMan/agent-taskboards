@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { Board, BoardColumn, Project, Task, TaskAttachment, TaskContext, TaskPriority } from "../../domain/types";
+import type { Board, BoardColumn, LabelMatchMode, Project, Task, TaskAttachment, TaskContext, TaskPriority } from "../../domain/types";
 import { columnStatus, glyphForName } from "../../lib/task-display";
 import { formatDate } from "../../lib/format";
+import { countTaskLabels, taskMatchesLabels } from "../../lib/task-labels";
 import { Button, EmptyState, Icon, InlineError, LabelChip, Mono, PriorityFlag, StatusIcon } from "../../components/ui";
+import { TagFilter } from "../../components/ui/TagFilter";
 import { Topbar } from "../../components/layout";
 import { PromptPicker } from "../prompts";
 import { TaskDetail } from "../tasks";
@@ -30,6 +32,14 @@ import {
   type BoardDisplayMode,
   type BoardSortKey,
 } from "./board-view-state";
+
+interface BoardTagFilter {
+  boardId: string | null;
+  tags: string[];
+  match: LabelMatchMode;
+}
+
+const emptyBoardTagFilter: BoardTagFilter = { boardId: null, tags: [], match: "all" };
 
 interface CapturedBoardScroll {
   boardId: string;
@@ -70,6 +80,7 @@ export function BoardWorkspace({
   onOpenTask,
   onPostComment,
   onRefresh,
+  onSearchTag,
   onTaskDraftChange,
   onUpdateTask,
   onUploadTaskAttachment,
@@ -114,6 +125,7 @@ export function BoardWorkspace({
   onOpenTask: (taskId: string) => void;
   onPostComment: (taskId: string, body: string) => Promise<void>;
   onRefresh: (taskId?: string | null) => Promise<void>;
+  onSearchTag: (label: string) => void;
   onTaskDraftChange: (taskId: string, fields: { title?: string; description?: string | null; labels?: string[] } | null) => void;
   onUpdateTask: (taskId: string, input: { title?: string; description?: string | null; labels?: string[] }) => Promise<void>;
   onUploadTaskAttachment: (taskId: string, file: File) => Promise<TaskAttachment>;
@@ -126,23 +138,37 @@ export function BoardWorkspace({
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set());
   const [rangeSelectionAnchors, setRangeSelectionAnchors] = useState<Map<string, string>>(() => new Map());
   const [promptPickerOpen, setPromptPickerOpen] = useState(storedPromptPickerVisible);
+  const [tagFilterState, setTagFilterState] = useState<BoardTagFilter>(emptyBoardTagFilter);
   const promptPickerPanelRef = useRef<HTMLElement | null>(null);
   const activeBoardId = activeBoard?.id ?? null;
+  // The tag filter belongs to the board it was set on, so switching boards
+  // starts unfiltered without an extra render.
+  const tagFilter = tagFilterState.boardId === activeBoardId ? tagFilterState : emptyBoardTagFilter;
+  const tagFilterActive = tagFilter.tags.length > 0;
   const boardScrollerElement = useRef<HTMLDivElement | null>(null);
   const columnScrollerElements = useRef(new Map<string, HTMLDivElement>());
   const capturedBoardScroll = useRef<CapturedBoardScroll | null>(null);
   const sortedTasks = useMemo(() => sortBoardTasks(tasks, columns, sortKey), [columns, sortKey, tasks]);
+  const boardLabels = useMemo(() => countTaskLabels(tasks), [tasks]);
+  // Filtering only hides cards; moves are still planned against the full
+  // column so hidden tasks keep their positions.
+  const visibleTasks = useMemo(
+    () => (tagFilter.tags.length > 0
+      ? sortedTasks.filter((task) => taskMatchesLabels(task.labels, tagFilter.tags, tagFilter.match))
+      : sortedTasks),
+    [sortedTasks, tagFilter.match, tagFilter.tags],
+  );
   const columnsById = useMemo(() => new Map(columns.map((column) => [column.id, column])), [columns]);
   const tasksByColumn = useMemo(() => {
     const map = new Map<string, Task[]>();
     for (const column of columns) {
       map.set(column.id, []);
     }
-    for (const task of sortedTasks) {
+    for (const task of visibleTasks) {
       map.get(task.columnId)?.push(task);
     }
     return map;
-  }, [columns, sortedTasks]);
+  }, [columns, visibleTasks]);
 
   const activePickerTask = useMemo(
     () => tasks.find((task) => task.id === activeTaskId) ?? activeTaskContext?.task ?? null,
@@ -151,7 +177,21 @@ export function BoardWorkspace({
 
   const loadingWorkspace = loadingProjects || loadingBoard;
   const { isRefreshing, showInitialSkeleton } = boardLoadingState(loadingWorkspace, Boolean(activeBoard));
-  const boardSummaryText = `${tasks.length} tasks · ${columns.length} columns · ${tasks.filter((task) => task.completedAt).length} done`;
+  const boardSummaryText = tagFilterActive
+    ? `${visibleTasks.length} of ${tasks.length} tasks · ${visibleTasks.filter((task) => task.completedAt).length} done`
+    : `${tasks.length} tasks · ${columns.length} columns · ${tasks.filter((task) => task.completedAt).length} done`;
+  const setTagFilter = useCallback(
+    (tags: string[], match: LabelMatchMode) => setTagFilterState({ boardId: activeBoardId, tags, match }),
+    [activeBoardId],
+  );
+  const addTagFilter = useCallback(
+    (label: string) => {
+      if (!tagFilter.tags.includes(label)) {
+        setTagFilter([...tagFilter.tags, label], tagFilter.match);
+      }
+    },
+    [setTagFilter, tagFilter.match, tagFilter.tags],
+  );
   const setDisplayPreference = (mode: BoardDisplayMode) => {
     setDisplayMode(mode);
     persistBoardDisplayMode(mode);
@@ -360,7 +400,7 @@ export function BoardWorkspace({
         return current;
       }
 
-      const visibleTaskIds = new Set(tasks.map((task) => task.id));
+      const visibleTaskIds = new Set(visibleTasks.map((task) => task.id));
       const nextSelection = new Set([...current].filter((taskId) => visibleTaskIds.has(taskId)));
       return nextSelection.size === current.size ? current : nextSelection;
     });
@@ -369,13 +409,13 @@ export function BoardWorkspace({
         return current;
       }
 
-      const visibleTaskIds = new Set(tasks.map((task) => task.id));
+      const visibleTaskIds = new Set(visibleTasks.map((task) => task.id));
       const nextAnchors = new Map(
         [...current].filter(([, taskId]) => visibleTaskIds.has(taskId)),
       );
       return nextAnchors.size === current.size ? current : nextAnchors;
     });
-  }, [tasks]);
+  }, [visibleTasks]);
 
   useEffect(() => {
     if (!activeBoardId || displayMode !== "board") {
@@ -519,6 +559,13 @@ export function BoardWorkspace({
                 </>
               )}
               <span className="subtoolbar__spacer" />
+              <span className="toolbar-label">Tags</span>
+              <TagFilter
+                labels={boardLabels}
+                match={tagFilter.match}
+                onChange={setTagFilter}
+                selected={tagFilter.tags}
+              />
               <span className="toolbar-label">Sort</span>
               <select
                 aria-label="Sort tasks"
@@ -537,8 +584,10 @@ export function BoardWorkspace({
               <BoardTaskList
                 activeTaskId={activeTaskId}
                 columnsById={columnsById}
+                emptyText={tagFilterActive ? "No tasks match the tag filter" : "No tasks"}
+                onLabelClick={addTagFilter}
                 onOpenTask={onOpenTask}
-                tasks={sortedTasks}
+                tasks={visibleTasks}
               />
             ) : (
               <div className="board-columns" onScroll={recordBoardScroll} ref={boardScrollerElement}>
@@ -554,6 +603,7 @@ export function BoardWorkspace({
                     }}
                     onCreateTask={createTaskPreservingScroll}
                     onDropTask={handleTaskDrop}
+                    onLabelClick={addTagFilter}
                     onMoveTask={moveTaskPreservingScroll}
                     onOpenCreateTask={onOpenCreateTask}
                     onOpenTask={openTaskAndClearSelection}
@@ -595,6 +645,7 @@ export function BoardWorkspace({
               onMoveTaskToBoard={onMoveTaskToBoard}
               onNavigateToTask={onNavigateToTask}
               onPostComment={postCommentPreservingScroll}
+              onSearchTag={onSearchTag}
               onTaskDraftChange={onTaskDraftChange}
               onTogglePromptPicker={() => setPromptPickerPreference(!promptPickerOpen)}
               onUpdateTask={updateTaskPreservingScroll}
@@ -619,16 +670,20 @@ function isEditableKeyboardTarget(target: EventTarget | null) {
 function BoardTaskList({
   activeTaskId,
   columnsById,
+  emptyText,
+  onLabelClick,
   onOpenTask,
   tasks,
 }: {
   activeTaskId: string | null;
   columnsById: Map<string, BoardColumn>;
+  emptyText: string;
+  onLabelClick: (label: string) => void;
   onOpenTask: (taskId: string) => void;
   tasks: Task[];
 }) {
   if (tasks.length === 0) {
-    return <div className="board-list-empty">No tasks</div>;
+    return <div className="board-list-empty">{emptyText}</div>;
   }
 
   return (
@@ -675,7 +730,7 @@ function BoardTaskList({
                 <td>
                   <span className="board-list__labels">
                     {task.labels.slice(0, 3).map((label) => (
-                      <LabelChip key={label} label={label} />
+                      <LabelChip key={label} label={label} onClick={onLabelClick} title={`Filter by tag ${label}`} />
                     ))}
                   </span>
                 </td>

@@ -48,6 +48,13 @@ The board view should make task state easy to scan and change:
 - task cards show compact, high-signal information
 - blocked or review states should be visually obvious
 - archived content should stay out of active board views by default
+- a `Tags` filter in the board sub-toolbar narrows both the board and list
+  modes to cards carrying the picked tags, matching all of them or any of
+  them (the All/Any toggle appears once two tags are picked). The summary then
+  reads `N of M tasks`. Clicking a tag chip on a card or list row adds that tag
+  to the filter instead of opening the task. The filter lives in memory for the
+  current board and resets when switching boards. Hidden cards keep their
+  stored positions: drops are still planned against the full column
 
 The UI should keep movement semantics aligned with the API. Moving a card in the
 UI should map to the same explicit task move operation that agents use.
@@ -114,11 +121,19 @@ Search should support both human recall and agent memory inspection:
 
 - text search for exact titles, IDs, labels, and keywords
 - semantic search for related work and prior decisions
-- filters for project, board, active content, and archived content
+- filters for project, board, tags, active content, and archived content
 - result cards that clearly show object type and parent context
 
 Search results should link directly to the relevant project, board, task, or
 comment context.
+
+The `Tags` filter picks from the labels in use (`GET /api/labels`, scoped to
+the selected project) and offers an All/Any match toggle. Tags alone, with an
+empty text box, list the tagged tasks newest-updated first, with no relevance
+score. Tags together with text keep only tasks carrying the tags and comments
+on those tasks; boards drop out. The text, tags, and match mode live in the URL
+(`/search?q=…&tag=a&tag=b&match=any`). Clicking a tag chip in a task's
+Properties section opens this view filtered to that tag.
 
 ## Prompt Library Experience
 

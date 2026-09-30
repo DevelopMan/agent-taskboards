@@ -692,6 +692,8 @@ Request:
   "preferredBoardId": "optional",
   "taskId": "optional",
   "sourceTypes": ["board", "task", "comment"],
+  "labels": ["optional", "tags"],
+  "labelMatch": "all",
   "includeArchived": false,
   "limit": 10
 }
@@ -699,13 +701,26 @@ Request:
 
 Required fields:
 
-- `query`
+- `query`, unless `labels` is non-empty
 
 Defaults:
 
 - `sourceTypes`: all indexed source types
+- `labelMatch`: `all`
 - `includeArchived`: `false`
 - `limit`: `10`
+
+`labels` (up to 20) filters by task labels: `labelMatch: "all"` keeps tasks
+carrying every listed label and `"any"` keeps tasks carrying at least one.
+Labels match exactly and case-sensitively after trimming, like the agent task
+list's `labels` filter. With a non-empty `query`, results keep only tasks that
+match and comments on those tasks, and boards are dropped. With an empty or
+omitted `query`, search skips embeddings and lists matching tasks by
+`updatedAt`, newest first, up to `limit`. Those results carry `distance: 0`,
+`searchDocumentId: "task-labels:<taskId>"`, and
+`metadata: { "sourceTextField": "labels", "matchType": "labels" }`, and they
+are empty when `sourceTypes` excludes `task`. `POST /api/agents/search` accepts
+the same body.
 
 For queries with six or more trimmed characters, task searches also include
 deterministic, case-insensitive task ID substring matches. These synthetic task
@@ -741,6 +756,25 @@ provided. Archiving a task deletes task-scoped search documents and vectors, so
 archived task and comment content is available through direct archived reads,
 not semantic search. Comments inherit archive visibility from their parent task,
 board, and project when indexed.
+
+## Labels
+
+`GET /api/labels`
+
+Lists the distinct task labels in use with the number of tasks carrying each,
+for tag pickers. Optional query parameters: `projectId`, `boardId`, and
+`includeArchived=true`. Tasks in archived projects or boards, and archived
+tasks, are skipped unless `includeArchived=true`. Labels are trimmed, empty and
+non-string entries are skipped, and the list is sorted case-insensitively.
+
+```json
+{
+  "labels": [
+    { "label": "api", "count": 12 },
+    { "label": "ui", "count": 7 }
+  ]
+}
+```
 
 ## Prompt Library
 

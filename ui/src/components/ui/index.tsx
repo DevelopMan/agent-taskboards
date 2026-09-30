@@ -214,12 +214,42 @@ export function Avatar({
   );
 }
 
-export function LabelChip({ label }: { label: string }) {
-  return (
-    <span className="label-chip">
+export function LabelChip({
+  label,
+  onClick,
+  title,
+}: {
+  label: string;
+  onClick?: (label: string) => void;
+  title?: string;
+}) {
+  const content = (
+    <>
       <span className="label-chip__dot" style={{ background: labelColor(label) }} />
       {label}
-    </span>
+    </>
+  );
+  if (!onClick) {
+    return <span className="label-chip">{content}</span>;
+  }
+
+  // Chips sit inside clickable cards and rows, so keep their clicks and
+  // activation keys from also opening the task underneath.
+  return (
+    <button
+      className="label-chip"
+      draggable={false}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClick(label);
+      }}
+      onKeyDown={(event) => event.stopPropagation()}
+      title={title}
+      type="button"
+    >
+      {content}
+    </button>
   );
 }
 

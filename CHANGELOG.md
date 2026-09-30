@@ -4,6 +4,18 @@ Important changes to Agent Taskboards are documented in this file.
 
 ## Released
 
+### 2026-09-30
+
+- **Search by tags** (`add-search-by-tags-2r5elm`): The search view has a
+  `Tags` filter with an All/Any match toggle. Tags alone list the tagged tasks
+  and, combined with text, narrow semantic results to tagged tasks and their
+  comments. The filter is kept in the URL. The board and list views gain the
+  same `Tags` filter in the sub-toolbar. Clicking a tag chip on a card or list
+  row filters the board by it, and clicking one in task detail opens a tag
+  search. `POST /api/search` accepts `labels` and `labelMatch` and no longer
+  requires `query` when labels are given, and the new `GET /api/labels` lists
+  the labels in use with task counts.
+
 ### 2026-09-28
 
 - **Prompt library import and export** (`import-and-export-prompt-3ksuvl`):

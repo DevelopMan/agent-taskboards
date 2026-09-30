@@ -294,6 +294,98 @@ select {
   border-radius: 50%;
 }
 
+button.label-chip {
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--fs-11);
+}
+
+button.label-chip:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+button.label-chip:focus-visible,
+.label-chip__remove:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.editable-label-chip {
+  display: inline-flex;
+  align-items: center;
+}
+
+.editable-label-chip .label-chip {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.label-chip__remove {
+  display: inline-grid;
+  width: 20px;
+  height: 21px;
+  place-items: center;
+  border: 1px solid var(--line-faint);
+  border-left: 0;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--bg-surface-2);
+  color: var(--fg-faint);
+  cursor: pointer;
+  padding: 0;
+}
+
+.label-chip__remove:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.tag-filter {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.tag-filter__chips {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--s-1);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tag-filter__select {
+  max-width: 160px;
+  padding: 2px var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-12);
+}
+
+.tag-filter__clear {
+  border: 0;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--fs-11);
+  padding: 2px var(--s-1);
+}
+
+.tag-filter__clear:hover {
+  color: var(--fg);
+}
+
+.tag-filter__clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .empty-state {
   display: flex;
   max-width: 440px;

@@ -14,7 +14,7 @@ import { BoardWorkspace } from "../features/boards";
 import type { TaskMovePlan } from "../features/boards/board-selection";
 import { ProjectsWorkspace } from "../features/projects";
 import { PromptsWorkspace } from "../features/prompts";
-import { SearchWorkspace } from "../features/search";
+import { SearchWorkspace, type SearchWorkspaceState } from "../features/search";
 import { BoardSettingsPanel, SettingsWorkspace } from "../features/settings";
 import { MaintenanceWorkspace } from "../features/maintenance";
 import { persistTaskAutoSaveEnabled, storedTaskAutoSaveEnabled } from "../features/tasks/task-auto-save";
@@ -24,6 +24,8 @@ import {
 } from "./CreateResourcePanels";
 import { archiveTaskBatch } from "./archive-tasks";
 import { transferTaskToBoard } from "./move-task-to-board";
+
+const noSearchTags: string[] = [];
 
 export function App() {
   const initialRoute = useMemo(() => parseRoute(), []);
@@ -303,7 +305,7 @@ export function App() {
       return;
     }
     if (nextView === "search") {
-      navigate({ view: "search", query: null });
+      navigate({ view: "search", query: null, tags: [], tagMatch: "all" });
       return;
     }
     navigate({ view: nextView });
@@ -328,14 +330,21 @@ export function App() {
 
   const handleSearchSubmit = useCallback(
     (nextQuery: string) => {
-      navigate({ view: "search", query: nextQuery });
+      navigate({ view: "search", query: nextQuery, tags: [], tagMatch: "all" });
     },
     [navigate],
   );
 
-  const handleSearchQueryChange = useCallback(
-    (nextQuery: string | null) => {
-      navigate({ view: "search", query: nextQuery }, "replace");
+  const handleSearchChange = useCallback(
+    (state: SearchWorkspaceState) => {
+      navigate({ view: "search", ...state }, "replace");
+    },
+    [navigate],
+  );
+
+  const openTagSearch = useCallback(
+    (label: string) => {
+      navigate({ view: "search", query: null, tags: [label], tagMatch: "all" });
     },
     [navigate],
   );
@@ -488,6 +497,7 @@ export function App() {
             }}
             onOpenSettings={() => setSettingsOpen(true)}
             onRefresh={refreshAfterMutation}
+            onSearchTag={openTagSearch}
             onTaskDraftChange={trackTaskDraft}
             onUpdateTask={async (taskId, input) => {
               setMutationError(null);
@@ -538,8 +548,10 @@ export function App() {
         {view === "search" && (
           <SearchWorkspace
             initialQuery={route.view === "search" ? route.query : null}
+            initialTagMatch={route.view === "search" ? route.tagMatch : "all"}
+            initialTags={route.view === "search" ? route.tags : noSearchTags}
             onOpenResult={openSearchResult}
-            onQueryChange={handleSearchQueryChange}
+            onSearchChange={handleSearchChange}
             preferredBoardId={selectedBoardId}
             projectTree={displayedProjectTree}
           />

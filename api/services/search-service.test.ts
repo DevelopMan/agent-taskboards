@@ -915,6 +915,208 @@ describe("search service", () => {
     ).toBe(true);
   });
 
+  it("lists tagged tasks without a text query using all or any label matching", async () => {
+    client = createMigratedClient();
+    const { db } = client;
+    const { project, board, column } = createBoardFixture("label-board");
+    const insertTask = (id: string, labels: unknown[], updatedAt: Date, archivedAt: Date | null = null) =>
+      db
+        .insert(tasks)
+        .values({
+          id,
+          projectId: project.id,
+          boardId: board.id,
+          columnId: column.id,
+          title: `Task ${id}`,
+          description: `Details for ${id}`,
+          labels,
+          position: 0,
+          updatedAt,
+          archivedAt,
+        })
+        .run();
+    insertTask("both-older", ["api", " ui "], new Date("2026-01-01T00:00:00Z"));
+    insertTask("both-newer", ["ui", "api", 7], new Date("2026-02-01T00:00:00Z"));
+    insertTask("api-only", ["api"], new Date("2026-03-01T00:00:00Z"));
+    insertTask("case-differs", ["API", "UI"], new Date("2026-04-01T00:00:00Z"));
+    insertTask("archived-both", ["api", "ui"], new Date("2026-05-01T00:00:00Z"), new Date());
+
+    const search = new SearchService(client, createFakeEmbeddingModel());
+    const allResults = await search.search({
+      query: "",
+      labels: ["api", "ui", "api"],
+      includeArchived: false,
+      limit: 10,
+    });
+    expect(allResults.map((result) => result.sourceId)).toEqual([
+      "both-newer",
+      "both-older",
+    ]);
+    expect(allResults[0]).toMatchObject({
+      searchDocumentId: "task-labels:both-newer",
+      sourceType: "task",
+      taskId: "both-newer",
+      title: "Task both-newer",
+      distance: 0,
+      metadata: { sourceTextField: "labels", matchType: "labels" },
+    });
+    expect(allResults[0]?.snippet).toContain("Tags: ui, api");
+
+    const anyResults = await search.search({
+      query: "  ",
+      labels: ["api", "ui"],
+      labelMatch: "any",
+      includeArchived: true,
+      limit: 10,
+    });
+    expect(anyResults.map((result) => result.sourceId)).toEqual([
+      "archived-both",
+      "api-only",
+      "both-newer",
+      "both-older",
+    ]);
+
+    expect(
+      await search.search({
+        query: "",
+        labels: ["api"],
+        includeArchived: false,
+        limit: 1,
+      }),
+    ).toHaveLength(1);
+    expect(
+      await search.search({
+        query: "",
+        labels: ["api"],
+        sourceTypes: ["comment"],
+        includeArchived: false,
+        limit: 10,
+      }),
+    ).toHaveLength(0);
+  });
+
+  it("filters semantic results to tagged tasks and their comments", async () => {
+    client = createMigratedClient();
+    const { db } = client;
+    const { project, board, column } = createBoardFixture("sqlite-label-board");
+    const taggedTask = db
+      .insert(tasks)
+      .values({
+        projectId: project.id,
+        boardId: board.id,
+        columnId: column.id,
+        title: "Tagged sqlite migration",
+        labels: ["db"],
+        position: 0,
+      })
+      .returning()
+      .get();
+    const untaggedTask = db
+      .insert(tasks)
+      .values({
+        projectId: project.id,
+        boardId: board.id,
+        columnId: column.id,
+        title: "Untagged sqlite migration",
+        labels: ["ui"],
+        position: 1,
+      })
+      .returning()
+      .get();
+    const taggedComment = db
+      .insert(taskComments)
+      .values({
+        projectId: project.id,
+        boardId: board.id,
+        taskId: taggedTask.id,
+        authorType: "human",
+        body: "The sqlite migration is blocked.",
+      })
+      .returning()
+      .get();
+    const untaggedComment = db
+      .insert(taskComments)
+      .values({
+        projectId: project.id,
+        boardId: board.id,
+        taskId: untaggedTask.id,
+        authorType: "human",
+        body: "Another sqlite migration note.",
+      })
+      .returning()
+      .get();
+
+    const search = new SearchService(client, createFakeEmbeddingModel());
+    await search.indexBoard(board);
+    await search.indexTask(taggedTask);
+    await search.indexTask(untaggedTask);
+    await search.indexComment(taggedComment);
+    await search.indexComment(untaggedComment);
+
+    const results = await search.search({
+      query: "sqlite migration board",
+      labels: ["db"],
+      includeArchived: false,
+      limit: 10,
+    });
+    expect(
+      results.map((result) => `${result.sourceType}:${result.sourceId}`).sort(),
+    ).toEqual(
+      [`comment:${taggedComment.id}`, `task:${taggedTask.id}`].sort(),
+    );
+
+    expect(
+      await search.search({
+        query: "sqlite migration",
+        labels: ["db"],
+        sourceTypes: ["board"],
+        includeArchived: false,
+        limit: 10,
+      }),
+    ).toHaveLength(0);
+  });
+
+  it("lists distinct task labels with counts in scope", () => {
+    client = createMigratedClient();
+    const { db } = client;
+    const { project, board, column } = createBoardFixture("labels-list-board");
+    const other = createBoardWithColumn(project.id, "labels-list-other");
+    const values = [
+      { boardId: board.id, columnId: column.id, labels: ["ui", " api ", "", 3] },
+      { boardId: board.id, columnId: column.id, labels: ["api", "Beta"] },
+      { boardId: other.board.id, columnId: other.column.id, labels: ["alpha"] },
+      { boardId: board.id, columnId: column.id, labels: ["hidden"], archivedAt: new Date() },
+    ];
+    for (const [index, value] of values.entries()) {
+      db.insert(tasks)
+        .values({
+          projectId: project.id,
+          title: `Label task ${index}`,
+          position: index,
+          ...value,
+        })
+        .run();
+    }
+
+    const search = new SearchService(client, createFakeEmbeddingModel());
+    expect(
+      search.listLabels({ projectId: project.id, includeArchived: false }),
+    ).toEqual([
+      { label: "alpha", count: 1 },
+      { label: "api", count: 2 },
+      { label: "Beta", count: 1 },
+      { label: "ui", count: 1 },
+    ]);
+    expect(
+      search.listLabels({ boardId: board.id, includeArchived: true }),
+    ).toEqual([
+      { label: "api", count: 2 },
+      { label: "Beta", count: 1 },
+      { label: "hidden", count: 1 },
+      { label: "ui", count: 1 },
+    ]);
+  });
+
   function createMigratedClient() {
     tmpDir = mkdtempSync(join(tmpdir(), "taskboards-search-"));
     const databasePath = join(tmpDir, "test.sqlite");

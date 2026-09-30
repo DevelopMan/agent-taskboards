@@ -36,9 +36,11 @@ export function useSearch({
   const requestIdRef = useRef(0);
 
   const trimmed = query.trim();
+  // A tag filter alone is a complete search: the API lists the tagged tasks.
+  const hasLabels = (filters?.labels?.length ?? 0) > 0;
 
   useEffect(() => {
-    if (!enabled || !trimmed) {
+    if (!enabled || (!trimmed && !hasLabels)) {
       requestIdRef.current += 1;
       setState({ results: [], loading: false, error: null, lastQuery: null });
       return;
@@ -75,7 +77,7 @@ export function useSearch({
     return () => {
       window.clearTimeout(handle);
     };
-  }, [trimmed, filters, enabled, debounceMs]);
+  }, [trimmed, hasLabels, filters, enabled, debounceMs]);
 
   return state;
 }

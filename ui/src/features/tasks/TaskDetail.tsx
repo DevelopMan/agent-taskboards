@@ -139,6 +139,7 @@ export function TaskDetail({
   onMoveTaskToBoard,
   onNavigateToTask,
   onPostComment,
+  onSearchTag,
   onTaskDraftChange,
   onTogglePromptPicker,
   onUpdateTask,
@@ -161,6 +162,7 @@ export function TaskDetail({
   onMoveTaskToBoard: (taskId: string, boardId: string) => Promise<boolean>;
   onNavigateToTask: (projectId: string, boardId: string, taskId: string) => void;
   onPostComment: (taskId: string, body: string) => Promise<void>;
+  onSearchTag?: (label: string) => void;
   onTaskDraftChange: (taskId: string, fields: { title?: string; description?: string | null; labels?: string[] } | null) => void;
   onTogglePromptPicker?: () => void;
   onUpdateTask: (taskId: string, input: { title?: string; description?: string | null; labels?: string[] }) => Promise<void>;
@@ -1093,7 +1095,11 @@ export function TaskDetail({
           <span>Board</span><strong>{context.board.name}</strong>
           <span>Labels</span>
           <strong className="detail-labels">
-            {task.labels.length ? task.labels.map((label) => <LabelChip key={label} label={label} />) : "none"}
+            {task.labels.length
+              ? task.labels.map((label) => (
+                <LabelChip key={label} label={label} onClick={onSearchTag} title={`Search tasks tagged ${label}`} />
+              ))
+              : "none"}
           </strong>
           <span>API</span>
           <code>GET /api/tasks/{task.id}/context</code>

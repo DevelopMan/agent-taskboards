@@ -211,8 +211,17 @@ export interface ProjectTreeItem {
 
 export type SearchSourceType = "board" | "task" | "comment";
 
+export type LabelMatchMode = "all" | "any";
+
+export interface LabelCount {
+  label: string;
+  count: number;
+}
+
 export interface SearchInput {
   query: string;
+  labels?: string[];
+  labelMatch?: LabelMatchMode;
   projectId?: string;
   boardId?: string;
   preferredBoardId?: string;

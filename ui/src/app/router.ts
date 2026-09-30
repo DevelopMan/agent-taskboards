@@ -1,10 +1,13 @@
+import type { LabelMatchMode } from "../domain/types";
+import { normalizeLabelList } from "../lib/task-labels";
+
 export const defaultSettingsSection = "general";
 
 export type AppRoute =
   | { view: "activity"; projectIds: string[]; sort: "asc" | "desc" }
   | { view: "board"; projectId: string | null; boardId: string | null; taskId: string | null }
   | { view: "projects"; projectId: string | null }
-  | { view: "search"; query: string | null }
+  | { view: "search"; query: string | null; tags: string[]; tagMatch: LabelMatchMode }
   | { view: "prompts" }
   | { view: "maintenance" }
   | { view: "settings"; section: string };
@@ -38,9 +41,14 @@ export function parseRoute(
   }
 
   if (parts[0] === "search") {
-    const query = new URLSearchParams(search).get("q");
-    const trimmed = query?.trim();
-    return { view: "search", query: trimmed ? trimmed : null };
+    const params = new URLSearchParams(search);
+    const trimmed = params.get("q")?.trim();
+    return {
+      view: "search",
+      query: trimmed ? trimmed : null,
+      tags: normalizeLabelList(params.getAll("tag")),
+      tagMatch: params.get("match") === "any" ? "any" : "all",
+    };
   }
 
   if (parts[0] === "prompts") {
@@ -84,7 +92,14 @@ export function routePath(route: AppRoute) {
     return `/settings/${encodeURIComponent(route.section)}`;
   }
   if (route.view === "search") {
-    return route.query ? `/search?q=${encodeURIComponent(route.query)}` : "/search";
+    const params = new URLSearchParams();
+    if (route.query) params.set("q", route.query);
+    for (const tag of route.tags) {
+      params.append("tag", tag);
+    }
+    if (route.tags.length > 0 && route.tagMatch !== "all") params.set("match", route.tagMatch);
+    const query = params.toString();
+    return query ? `/search?${query}` : "/search";
   }
   return `/${route.view}`;
 }

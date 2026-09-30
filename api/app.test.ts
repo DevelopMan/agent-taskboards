@@ -2594,6 +2594,65 @@ describe("starter API", () => {
     ).toBe("invalid_request");
   });
 
+  it("searches tasks by labels and lists labels in scope", async () => {
+    const { projectId, boardId } = await createProjectAndBoard();
+    const createTask = async (title: string, labels: string[]) =>
+      stringProp(
+        objectProp(
+          (
+            await api("POST", `/api/projects/${projectId}/boards/${boardId}/tasks`, {
+              title,
+              labels,
+            })
+          ).body,
+          "task",
+        ),
+        "id",
+      );
+    const bothId = await createTask("Both labels", ["api", "ui"]);
+    const apiId = await createTask("API label", ["api"]);
+
+    const allSearch = await api("POST", "/api/search", {
+      labels: ["api", "ui"],
+      projectId,
+    });
+    expect(allSearch.status).toBe(200);
+    expect(
+      arrayProp(allSearch.body, "results").map((result) =>
+        stringProp(asObject(result), "sourceId"),
+      ),
+    ).toEqual([bothId]);
+
+    const anySearch = await api("POST", "/api/search", {
+      query: "",
+      labels: ["api", "ui"],
+      labelMatch: "any",
+      boardId,
+    });
+    expect(
+      arrayProp(anySearch.body, "results")
+        .map((result) => stringProp(asObject(result), "sourceId"))
+        .sort(),
+    ).toEqual([apiId, bothId].sort());
+
+    const missingQuery = await api("POST", "/api/search", { labels: [] });
+    expect(missingQuery.status).toBe(400);
+    const badMatch = await api("POST", "/api/search", {
+      labels: ["api"],
+      labelMatch: "some",
+    });
+    expect(badMatch.status).toBe(400);
+
+    const labels = await api("GET", `/api/labels?projectId=${projectId}`);
+    expect(labels.status).toBe(200);
+    expect(labels.body).toEqual({
+      labels: [
+        { label: "api", count: 2 },
+        { label: "ui", count: 1 },
+      ],
+    });
+  });
+
   async function createProjectAndBoard() {
     const project = objectProp(
       (await api("POST", "/api/projects", { name: "test-project" })).body,
