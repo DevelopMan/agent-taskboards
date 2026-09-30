@@ -48,8 +48,9 @@ The board view should make task state easy to scan and change:
 - task cards show compact, high-signal information
 - blocked or review states should be visually obvious
 - archived content should stay out of active board views by default
-- a `Tags` filter in the board sub-toolbar narrows both the board and list
-  modes to cards carrying the picked tags, matching all of them or any of
+- a `Tags` filter in the board sub-toolbar, the same type-ahead tag field as
+  in search, narrows both the board and list modes to cards carrying the
+  picked tags, matching all of them or any of
   them (the All/Any toggle appears once two tags are picked). The summary then
   reads `N of M tasks`. Clicking a tag chip on a card or list row adds that tag
   to the filter instead of opening the task. The filter lives in memory for the
@@ -127,8 +128,12 @@ Search should support both human recall and agent memory inspection:
 Search results should link directly to the relevant project, board, task, or
 comment context.
 
-The `Tags` filter picks from the labels in use (`GET /api/labels`, scoped to
-the selected project) and offers an All/Any match toggle. Tags alone, with an
+The `Tags` filter is a type-ahead field over the labels in use
+(`GET /api/labels`, scoped to the selected project). Typing suggests matching
+tags, prefix matches first, with their task counts. Enter or a click adds the
+highlighted tag as a chip inside the field with an `x` to remove it, and
+Backspace in an empty field removes the last chip. An All/Any match toggle
+appears once two tags are picked. Tags alone, with an
 empty text box, list the tagged tasks newest-updated first, with no relevance
 score. Tags together with text keep only tasks carrying the tags and comments
 on those tasks; boards drop out. The text, tags, and match mode live in the URL

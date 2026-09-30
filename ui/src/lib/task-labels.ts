@@ -60,6 +60,30 @@ export function countTaskLabels(tasks: Array<{ labels: string[] }>): LabelCount[
     .sort((left, right) => compareLabels(left.label, right.label));
 }
 
+// Suggests tags for a type-ahead: labels starting with the typed text come
+// first, then labels containing it, each group keeping the input order.
+// Matching is case-insensitive; already selected tags are skipped.
+export function suggestTags(labels: LabelCount[], selected: string[], text: string, limit = 8) {
+  const needle = text.trim().toLowerCase();
+  const selectedSet = new Set(selected);
+  const prefixMatches: LabelCount[] = [];
+  const containsMatches: LabelCount[] = [];
+
+  for (const item of labels) {
+    if (selectedSet.has(item.label)) {
+      continue;
+    }
+    const position = item.label.toLowerCase().indexOf(needle);
+    if (position === 0) {
+      prefixMatches.push(item);
+    } else if (position > 0) {
+      containsMatches.push(item);
+    }
+  }
+
+  return [...prefixMatches, ...containsMatches].slice(0, limit);
+}
+
 function compareLabels(left: string, right: string) {
   const lowerLeft = left.toLowerCase();
   const lowerRight = right.toLowerCase();

@@ -3,6 +3,7 @@ import {
   countTaskLabels,
   formatTaskLabels,
   parseTaskLabels,
+  suggestTags,
   taskLabelsEqual,
   taskMatchesLabels,
 } from "./task-labels";
@@ -50,5 +51,27 @@ describe("task label helpers", () => {
       { label: "Beta", count: 1 },
       { label: "ui", count: 1 },
     ]);
+  });
+
+  it("suggests unselected tags with prefix matches before substring matches", () => {
+    const labels = [
+      { label: "api", count: 2 },
+      { label: "design", count: 1 },
+      { label: "Sign-off", count: 1 },
+      { label: "signals", count: 4 },
+      { label: "ui", count: 3 },
+    ];
+
+    expect(suggestTags(labels, [], " SIG ").map((item) => item.label)).toEqual([
+      "Sign-off",
+      "signals",
+      "design",
+    ]);
+    expect(suggestTags(labels, ["signals"], "sig").map((item) => item.label)).toEqual([
+      "Sign-off",
+      "design",
+    ]);
+    expect(suggestTags(labels, ["api"], "", 2).map((item) => item.label)).toEqual(["design", "Sign-off"]);
+    expect(suggestTags(labels, [], "zzz")).toEqual([]);
   });
 });

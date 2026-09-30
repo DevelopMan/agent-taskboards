@@ -325,3 +325,7 @@
   line-clamp: 3;
   overflow: hidden;
 }
+
+.search-filter--tags .tag-input {
+  width: 340px;
+}

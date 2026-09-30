@@ -347,8 +347,27 @@ button.label-chip:focus-visible,
   gap: var(--s-2);
 }
 
-.tag-filter__chips {
-  display: inline-flex;
+.tag-input {
+  position: relative;
+  display: flex;
+  width: 280px;
+  min-width: 0;
+  min-height: 26px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-input);
+  cursor: text;
+  padding: 1px var(--s-1);
+}
+
+.tag-input:focus-within {
+  border-color: var(--accent);
+}
+
+.tag-input__tokens {
+  display: flex;
+  flex: 1;
   min-width: 0;
   align-items: center;
   gap: var(--s-1);
@@ -356,15 +375,69 @@ button.label-chip:focus-visible,
   scrollbar-width: none;
 }
 
-.tag-filter__select {
-  max-width: 160px;
-  padding: 2px var(--s-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--bg-input);
+.tag-input__field {
+  flex: 1;
+  min-width: 72px;
+  border: 0;
+  background: transparent;
   color: var(--fg);
   font: inherit;
   font-size: var(--fs-12);
+  outline: none;
+  padding: 2px var(--s-1);
+}
+
+/* The surrounding field shows focus with its accent border. */
+.tag-input__field:focus-visible {
+  outline: none;
+}
+
+.tag-input__field::placeholder {
+  color: var(--fg-faint);
+}
+
+.tag-input__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 200px;
+  max-height: 260px;
+  margin: 0;
+  overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-pop);
+  list-style: none;
+  padding: var(--s-1);
+}
+
+.tag-input__option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  padding: 4px var(--s-2);
+}
+
+.tag-input__option--active {
+  background: var(--bg-hover);
+}
+
+.tag-input__count {
+  color: var(--fg-faint);
+  font-size: var(--fs-11);
+}
+
+.tag-input__empty {
+  color: var(--fg-muted);
+  font-size: var(--fs-12);
+  padding: 4px var(--s-2);
 }
 
 .tag-filter__clear {
@@ -483,4 +556,8 @@ button.label-chip:focus-visible,
 
 .tb ::-webkit-scrollbar-thumb:hover {
   background: var(--line-strong);
+}
+
+.subtoolbar .tag-input {
+  width: 220px;
 }
