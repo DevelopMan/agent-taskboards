@@ -26,6 +26,7 @@ export function TaskCard({
   columns,
   onArchiveTask,
   onDropTask,
+  onLabelClick,
   onMoveTask,
   onOpenTask,
   onSelectTask,
@@ -37,6 +38,7 @@ export function TaskCard({
   columns: BoardColumn[];
   onArchiveTask: (taskId: string) => Promise<void>;
   onDropTask: (taskId: string, columnId: string, targetTaskId?: string) => Promise<void>;
+  onLabelClick?: (label: string) => void;
   onMoveTask: (taskId: string, input: { columnId?: string; position?: number }) => Promise<void>;
   onOpenTask: (taskId: string) => void;
   onSelectTask: (taskId: string, columnId: string, range: boolean) => void;
@@ -215,7 +217,12 @@ export function TaskCard({
       {(task.labels.length > 0 || status === "blocked") && (
         <div className="task-card__footer">
           {task.labels.slice(0, 3).map((label) => (
-            <LabelChip key={label} label={label} />
+            <LabelChip
+              key={label}
+              label={label}
+              onClick={onLabelClick}
+              title={onLabelClick ? `Filter by tag ${label}` : undefined}
+            />
           ))}
           <span className="task-card__spacer" />
           {status === "blocked" && <Mono>blocked</Mono>}

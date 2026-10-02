@@ -11,6 +11,7 @@ export function BoardColumnView({
   onArchiveTask,
   onCreateTask,
   onDropTask,
+  onLabelClick,
   onMoveTask,
   onOpenCreateTask,
   onOpenTask,
@@ -26,6 +27,7 @@ export function BoardColumnView({
   onArchiveTask: (taskId: string) => Promise<void>;
   onCreateTask: (input: { title: string; description?: string | null; columnId?: string; priority?: TaskPriority; labels?: string[] }) => Promise<void>;
   onDropTask: (taskId: string, columnId: string, targetTaskId?: string) => Promise<void>;
+  onLabelClick?: (label: string) => void;
   onMoveTask: (taskId: string, input: { columnId?: string; position?: number }) => Promise<void>;
   onOpenCreateTask: (columnId: string | null) => void;
   onOpenTask: (taskId: string) => void;
@@ -66,6 +68,7 @@ export function BoardColumnView({
             key={task.id}
             onArchiveTask={onArchiveTask}
             onDropTask={onDropTask}
+            onLabelClick={onLabelClick}
             onMoveTask={onMoveTask}
             onOpenTask={onOpenTask}
             onSelectTask={onSelectTask}

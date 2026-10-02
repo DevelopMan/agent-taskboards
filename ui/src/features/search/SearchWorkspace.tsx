@@ -7,41 +7,59 @@ import {
   Mono,
   SkeletonRows,
 } from "../../components/ui";
+import { TagFilter } from "../../components/ui/TagFilter";
 import {
   fallbackTitle,
   iconForSourceType,
 } from "../../components/layout/SidebarSearch";
 import type {
+  LabelCount,
+  LabelMatchMode,
   ProjectTreeItem,
   SearchResult,
   SearchSourceType,
 } from "../../domain/types";
+import { api } from "../../lib/api";
 import { useSearch, type SearchFilters } from "./useSearch";
 
 const ALL_SOURCE_TYPES: SearchSourceType[] = ["board", "task", "comment"];
 const WORKSPACE_RESULT_LIMIT = 25;
 const URL_DEBOUNCE_MS = 350;
 
+export interface SearchWorkspaceState {
+  query: string | null;
+  tags: string[];
+  tagMatch: LabelMatchMode;
+}
+
 export function SearchWorkspace({
   initialQuery,
+  initialTagMatch,
+  initialTags,
   onOpenResult,
-  onQueryChange,
+  onSearchChange,
   preferredBoardId,
   projectTree,
 }: {
   initialQuery: string | null;
+  initialTagMatch: LabelMatchMode;
+  initialTags: string[];
   onOpenResult: (result: SearchResult) => void;
-  onQueryChange: (query: string | null) => void;
+  onSearchChange: (state: SearchWorkspaceState) => void;
   preferredBoardId: string | null;
   projectTree: ProjectTreeItem[];
 }) {
   const [query, setQuery] = useState(initialQuery ?? "");
+  const [tags, setTags] = useState(initialTags);
+  const [tagMatch, setTagMatch] = useState(initialTagMatch);
+  const [availableTags, setAvailableTags] = useState<LabelCount[]>([]);
   const [projectId, setProjectId] = useState<string>("");
   const [enabledSources, setEnabledSources] = useState<Set<SearchSourceType>>(
     () => new Set(ALL_SOURCE_TYPES),
   );
   const [includeArchived, setIncludeArchived] = useState(false);
   const lastInitialQueryRef = useRef(initialQuery ?? "");
+  const lastInitialTagsRef = useRef(tagStateKey(initialTags, initialTagMatch));
 
   useEffect(() => {
     const next = initialQuery ?? "";
@@ -50,6 +68,35 @@ export function SearchWorkspace({
       setQuery(next);
     }
   }, [initialQuery]);
+
+  useEffect(() => {
+    const next = tagStateKey(initialTags, initialTagMatch);
+    if (next !== lastInitialTagsRef.current) {
+      lastInitialTagsRef.current = next;
+      setTags(initialTags);
+      setTagMatch(initialTagMatch);
+    }
+  }, [initialTagMatch, initialTags]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listLabels({
+        ...(projectId ? { projectId } : {}),
+        ...(includeArchived ? { includeArchived: true } : {}),
+      })
+      .then((labels) => {
+        if (!cancelled) setAvailableTags(labels);
+      })
+      .catch(() => {
+        // The picker is a convenience; selected tags and search still work
+        // without the list, and search surfaces its own errors.
+        if (!cancelled) setAvailableTags([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [includeArchived, projectId]);
 
   const filters = useMemo<SearchFilters>(() => {
     const sourceTypes =
@@ -62,18 +109,19 @@ export function SearchWorkspace({
       ...(preferredBoardId ? { preferredBoardId } : {}),
       ...(sourceTypes ? { sourceTypes } : {}),
       ...(includeArchived ? { includeArchived: true } : {}),
+      ...(tags.length > 0 ? { labels: tags, labelMatch: tagMatch } : {}),
     };
-  }, [enabledSources, includeArchived, preferredBoardId, projectId]);
+  }, [enabledSources, includeArchived, preferredBoardId, projectId, tagMatch, tags]);
 
   const { results, loading, error, lastQuery } = useSearch({ query, filters });
 
   useEffect(() => {
     const trimmed = query.trim();
     const handle = window.setTimeout(() => {
-      onQueryChange(trimmed ? trimmed : null);
+      onSearchChange({ query: trimmed ? trimmed : null, tags, tagMatch });
     }, URL_DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
-  }, [query, onQueryChange]);
+  }, [query, onSearchChange, tagMatch, tags]);
 
   const crumbLookup = useMemo(() => {
     const projectNames = new Map<string, string>();
@@ -93,7 +141,7 @@ export function SearchWorkspace({
   }, [projectTree]);
 
   const trimmed = query.trim();
-  const hasQuery = trimmed.length > 0;
+  const hasQuery = trimmed.length > 0 || tags.length > 0;
   const showSkeleton = loading && results.length === 0;
 
   return (
@@ -164,6 +212,18 @@ export function SearchWorkspace({
                   })}
                 </div>
               </div>
+              <div className="search-filter search-filter--tags">
+                <span>Tags</span>
+                <TagFilter
+                  labels={availableTags}
+                  match={tagMatch}
+                  onChange={(nextTags, nextMatch) => {
+                    setTags(nextTags);
+                    setTagMatch(nextMatch);
+                  }}
+                  selected={tags}
+                />
+              </div>
               <label className="search-filter search-filter--toggle">
                 <input
                   checked={includeArchived}
@@ -180,16 +240,20 @@ export function SearchWorkspace({
           {!hasQuery && (
             <EmptyState
               title="Search your work"
-              body="Type a phrase, task ID, label, or natural-language question. Results combine text and embedding matches across boards, tasks, and comments."
+              body="Type a phrase, task ID, label, or natural-language question, or pick tags to list tagged tasks. Results combine text and embedding matches across boards, tasks, and comments."
             />
           )}
 
           {hasQuery && showSkeleton && <SkeletonRows />}
 
-          {hasQuery && !loading && !error && results.length === 0 && lastQuery && (
+          {hasQuery && !loading && !error && results.length === 0 && lastQuery !== null && (
             <EmptyState
-              title={`No results for "${lastQuery}"`}
-              body="Try different words, broaden the source-type filter, or include archived content."
+              title={lastQuery ? `No results for "${lastQuery}"` : "No tasks with these tags"}
+              body={
+                tags.length > 0
+                  ? "Try different words, remove a tag, match any tag, or include archived content."
+                  : "Try different words, broaden the source-type filter, or include archived content."
+              }
             />
           )}
 
@@ -215,7 +279,7 @@ export function SearchWorkspace({
                       </div>
                       <div className="search-result__snippet">{result.snippet}</div>
                     </div>
-                    <Mono faded>{formatDistance(result.distance)}</Mono>
+                    {!isTagListing(result) && <Mono faded>{formatDistance(result.distance)}</Mono>}
                   </button>
                 </li>
               ))}
@@ -231,6 +295,19 @@ function labelForSourceType(sourceType: SearchSourceType) {
   if (sourceType === "board") return "Board";
   if (sourceType === "comment") return "Comment";
   return "Task";
+}
+
+function tagStateKey(tags: string[], tagMatch: LabelMatchMode) {
+  return JSON.stringify([tags, tagMatch]);
+}
+
+// Tag-only results are a plain listing, so a relevance distance means nothing.
+function isTagListing(result: SearchResult) {
+  return (
+    typeof result.metadata === "object" &&
+    result.metadata !== null &&
+    (result.metadata as { matchType?: unknown }).matchType === "labels"
+  );
 }
 
 function formatDistance(distance: number) {

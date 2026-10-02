@@ -45,7 +45,7 @@ describe("documentTitleForRoute", () => {
       documentTitleForRoute({
         board,
         project,
-        route: { view: "search", query: null },
+        route: { view: "search", query: null, tags: [], tagMatch: "all" },
         task,
       }),
     ).toBe("Agent Taskboards");

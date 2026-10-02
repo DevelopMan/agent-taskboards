@@ -1,2 +1,2 @@
-export { SearchWorkspace } from "./SearchWorkspace";
+export { SearchWorkspace, type SearchWorkspaceState } from "./SearchWorkspace";
 export { useSearch } from "./useSearch";

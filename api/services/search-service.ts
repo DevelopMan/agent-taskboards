@@ -22,7 +22,11 @@ import {
   LocalEmbeddingModel,
   type EmbeddingResult,
 } from "../embeddings/local.js";
-import type { SearchInput } from "../models/request-schemas.js";
+import type {
+  LabelListQuery,
+  SearchInput,
+  SearchLabelMatch,
+} from "../models/request-schemas.js";
 
 const INDEXED_SOURCE_TYPES = ["board", "task", "comment"] as const;
 export type IndexedSourceType = (typeof INDEXED_SOURCE_TYPES)[number];
@@ -54,6 +58,26 @@ type TaskIdSearchRow = {
   projectId: string;
   boardId: string;
   title: string;
+};
+
+type LabeledTaskRow = {
+  id: string;
+  projectId: string;
+  boardId: string;
+  title: string;
+  description: string | null;
+  labels: string;
+  priority: Task["priority"];
+};
+
+type LabelFilter = {
+  labels: string[];
+  mode: SearchLabelMatch;
+};
+
+export type LabelCount = {
+  label: string;
+  count: number;
 };
 
 type IndexedSearchDocumentRow = SearchDocumentRow & {
@@ -208,8 +232,28 @@ export class SearchService {
   }
 
   async search(input: SearchInput): Promise<SearchResult[]> {
-    const sourceTypes = input.sourceTypes ?? [...INDEXED_SOURCE_TYPES];
-    const taskIdMatches = this.searchTaskIds(input, sourceTypes);
+    const labelFilter = makeLabelFilter(input);
+    if (labelFilter && !input.query.trim()) {
+      return this.searchTasksByLabels(input, labelFilter);
+    }
+
+    // Boards carry no labels, so a label filter can only keep tasks and
+    // comments on tasks.
+    const sourceTypes = (input.sourceTypes ?? [...INDEXED_SOURCE_TYPES]).filter(
+      (sourceType) => !labelFilter || sourceType !== "board",
+    );
+    if (sourceTypes.length === 0) {
+      return [];
+    }
+
+    const labelMatches = new Map<string, boolean>();
+    const applyLabelFilter = (results: SearchResult[]) =>
+      labelFilter
+        ? this.filterResultsByLabels(results, labelFilter, labelMatches)
+        : results;
+    const taskIdMatches = applyLabelFilter(
+      this.searchTaskIds(input, sourceTypes),
+    );
     if (taskIdMatches.length >= input.limit) {
       return taskIdMatches.slice(0, input.limit);
     }
@@ -222,12 +266,14 @@ export class SearchService {
     let results: SearchResult[] = [];
 
     while (vectorLimit <= SEARCH_VECTOR_MAX_LIMIT) {
-      results = this.searchGroupedSources({
-        input,
-        queryVector,
-        sourceTypes,
-        vectorLimit,
-      });
+      results = applyLabelFilter(
+        this.searchGroupedSources({
+          input,
+          queryVector,
+          sourceTypes,
+          vectorLimit,
+        }),
+      );
       const mergedResults = mergeTaskIdMatches(taskIdMatches, results);
 
       if (
@@ -241,6 +287,98 @@ export class SearchService {
     }
 
     return mergeTaskIdMatches(taskIdMatches, results).slice(0, limit);
+  }
+
+  listLabels(input: LabelListQuery): LabelCount[] {
+    const { clauses, params } = taskScopeClauses(input);
+    return this.sqlite
+      .prepare(
+        `
+        SELECT trim(label.value) AS label, COUNT(DISTINCT t.id) AS count
+        FROM tasks t
+        JOIN projects p ON p.id = t.project_id
+        JOIN boards b ON b.id = t.board_id
+        JOIN json_each(t.labels) label
+        WHERE label.type = 'text'
+          AND trim(label.value) <> ''
+          ${clauses.map((clause) => `AND ${clause}`).join(" ")}
+        GROUP BY trim(label.value)
+        ORDER BY lower(trim(label.value)), trim(label.value)
+      `,
+      )
+      .all(...params) as LabelCount[];
+  }
+
+  private searchTasksByLabels(
+    input: SearchInput,
+    filter: LabelFilter,
+  ): SearchResult[] {
+    const sourceTypes = input.sourceTypes ?? [...INDEXED_SOURCE_TYPES];
+    if (!sourceTypes.includes("task")) {
+      return [];
+    }
+
+    const { clauses, params } = taskScopeClauses(input);
+    if (input.taskId) {
+      clauses.push("t.id = ?");
+      params.push(input.taskId);
+    }
+    clauses.push(labelMatchClause(filter));
+    params.push(...filter.labels);
+
+    const rows = this.sqlite
+      .prepare(
+        `
+        SELECT
+          t.id,
+          t.project_id AS projectId,
+          t.board_id AS boardId,
+          t.title,
+          t.description,
+          t.labels,
+          t.priority
+        FROM tasks t
+        JOIN projects p ON p.id = t.project_id
+        JOIN boards b ON b.id = t.board_id
+        WHERE ${clauses.join(" AND ")}
+        ORDER BY t.updated_at DESC, t.id
+        LIMIT ?
+      `,
+      )
+      .all(...params, input.limit) as LabeledTaskRow[];
+
+    return rows.map((row) => labelSearchResult(row));
+  }
+
+  private filterResultsByLabels(
+    results: SearchResult[],
+    filter: LabelFilter,
+    cache: Map<string, boolean>,
+  ) {
+    const uncachedTaskIds = [
+      ...new Set(
+        results.flatMap((result) =>
+          result.taskId && !cache.has(result.taskId) ? [result.taskId] : [],
+        ),
+      ),
+    ];
+    if (uncachedTaskIds.length > 0) {
+      const rows = this.db
+        .select({ id: tasks.id, labels: tasks.labels })
+        .from(tasks)
+        .where(inArray(tasks.id, uncachedTaskIds))
+        .all();
+      for (const taskId of uncachedTaskIds) {
+        cache.set(taskId, false);
+      }
+      for (const row of rows) {
+        cache.set(row.id, matchesLabelFilter(row.labels, filter));
+      }
+    }
+
+    return results.filter(
+      (result) => result.taskId !== null && cache.get(result.taskId) === true,
+    );
   }
 
   private async indexSourceDocuments(
@@ -536,28 +674,13 @@ export class SearchService {
       return [];
     }
 
-    const clauses = ["lower(t.id) LIKE ? ESCAPE '\\'"];
-    const params: unknown[] = [`%${escapeLike(query)}%`];
-
-    if (input.projectId) {
-      clauses.push("t.project_id = ?");
-      params.push(input.projectId);
-    }
-
-    if (input.boardId) {
-      clauses.push("t.board_id = ?");
-      params.push(input.boardId);
-    }
+    const { clauses, params } = taskScopeClauses(input);
+    clauses.push("lower(t.id) LIKE ? ESCAPE '\\'");
+    params.push(`%${escapeLike(query)}%`);
 
     if (input.taskId) {
       clauses.push("t.id = ?");
       params.push(input.taskId);
-    }
-
-    if (!input.includeArchived) {
-      clauses.push("t.archived_at IS NULL");
-      clauses.push("p.archived_at IS NULL");
-      clauses.push("b.archived_at IS NULL");
     }
 
     const rows = this.sqlite
@@ -728,6 +851,91 @@ function taskIdSearchResult(
     distance: matchType === "exact" ? 0 : 0.001,
     metadata: { sourceTextField: "taskId", matchType },
   };
+}
+
+function makeLabelFilter(input: SearchInput): LabelFilter | null {
+  const labels = [...new Set(normalizeLabels(input.labels ?? []))];
+  return labels.length > 0
+    ? { labels, mode: input.labelMatch ?? "all" }
+    : null;
+}
+
+function matchesLabelFilter(taskLabels: readonly unknown[], filter: LabelFilter) {
+  const labels = new Set(normalizeLabels(taskLabels));
+  return filter.mode === "any"
+    ? filter.labels.some((label) => labels.has(label))
+    : filter.labels.every((label) => labels.has(label));
+}
+
+function labelMatchClause(filter: LabelFilter) {
+  const placeholders = filter.labels.map(() => "?").join(", ");
+  const matchingLabels = `
+    SELECT COUNT(DISTINCT trim(label.value))
+    FROM json_each(t.labels) label
+    WHERE label.type = 'text' AND trim(label.value) IN (${placeholders})
+  `;
+  return filter.mode === "any"
+    ? `(${matchingLabels}) > 0`
+    : `(${matchingLabels}) = ${filter.labels.length}`;
+}
+
+function taskScopeClauses(input: {
+  projectId?: string;
+  boardId?: string;
+  includeArchived: boolean;
+}) {
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+
+  if (input.projectId) {
+    clauses.push("t.project_id = ?");
+    params.push(input.projectId);
+  }
+
+  if (input.boardId) {
+    clauses.push("t.board_id = ?");
+    params.push(input.boardId);
+  }
+
+  if (!input.includeArchived) {
+    clauses.push("t.archived_at IS NULL");
+    clauses.push("p.archived_at IS NULL");
+    clauses.push("b.archived_at IS NULL");
+  }
+
+  return { clauses, params };
+}
+
+function labelSearchResult(row: LabeledTaskRow): SearchResult {
+  const labels = parseLabelsColumn(row.labels);
+  return {
+    searchDocumentId: `task-labels:${row.id}`,
+    sourceType: "task",
+    sourceId: row.id,
+    projectId: row.projectId,
+    boardId: row.boardId,
+    taskId: row.id,
+    title: row.title,
+    snippet: makeSnippet(
+      formatTaskEmbeddingText({
+        title: row.title,
+        description: row.description,
+        labels,
+        priority: row.priority,
+      }),
+    ),
+    distance: 0,
+    metadata: { sourceTextField: "labels", matchType: "labels" },
+  };
+}
+
+function parseLabelsColumn(value: string): unknown[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 function mergeTaskIdMatches(

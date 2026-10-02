@@ -17,6 +17,7 @@ import type {
   PromptLibraryImportMode,
   PromptLibraryImportResult,
   PromptRestoreDefaultsResponse,
+  LabelCount,
   SearchInput,
   SearchResponse,
   Task,
@@ -577,6 +578,17 @@ export const api = {
       { method: "DELETE" },
     );
     return body;
+  },
+
+  listLabels: async (input: { projectId?: string; boardId?: string; includeArchived?: boolean } = {}) => {
+    const params = new URLSearchParams();
+    if (input.projectId) params.set("projectId", input.projectId);
+    if (input.boardId) params.set("boardId", input.boardId);
+    if (input.includeArchived) params.set("includeArchived", "true");
+
+    const query = params.toString();
+    const body = await request<{ labels: LabelCount[] }>(`/api/labels${query ? `?${query}` : ""}`);
+    return body.labels;
   },
 
   search: (input: SearchInput) =>

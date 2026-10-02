@@ -314,15 +314,29 @@ export const promptLibraryImportSchema = z
 
 const indexedSearchSourceTypes = ["board", "task", "comment"] as const;
 
-export const searchSchema = z.object({
-  query: requiredString.max(1000),
+export const searchLabelMatchModes = ["all", "any"] as const;
+
+export const searchSchema = z
+  .object({
+    query: z.string().trim().max(1000).optional().default(""),
+    projectId: requiredString.optional(),
+    boardId: requiredString.optional(),
+    preferredBoardId: requiredString.optional(),
+    taskId: requiredString.optional(),
+    sourceTypes: z.array(z.enum(indexedSearchSourceTypes)).min(1).optional(),
+    labels: z.array(requiredString.max(200)).max(20).optional(),
+    labelMatch: z.enum(searchLabelMatchModes).optional(),
+    includeArchived: z.boolean().optional().default(false),
+    limit: z.number().int().min(1).max(50).optional().default(10),
+  })
+  .refine((input) => input.query.length > 0 || (input.labels?.length ?? 0) > 0, {
+    message: "query is required unless labels are provided",
+    path: ["query"],
+  });
+
+export const labelListQuerySchema = includeArchivedQuerySchema.extend({
   projectId: requiredString.optional(),
   boardId: requiredString.optional(),
-  preferredBoardId: requiredString.optional(),
-  taskId: requiredString.optional(),
-  sourceTypes: z.array(z.enum(indexedSearchSourceTypes)).min(1).optional(),
-  includeArchived: z.boolean().optional().default(false),
-  limit: z.number().int().min(1).max(50).optional().default(10),
 });
 
 export type ProjectCreateInput = z.infer<typeof projectCreateSchema>;
@@ -336,6 +350,8 @@ export type TaskMoveInput = z.infer<typeof taskMoveSchema>;
 export type CommentCreateInput = z.infer<typeof commentCreateSchema>;
 export type ActivityQuery = z.infer<typeof activityQuerySchema>;
 export type SearchInput = z.infer<typeof searchSchema>;
+export type SearchLabelMatch = (typeof searchLabelMatchModes)[number];
+export type LabelListQuery = z.infer<typeof labelListQuerySchema>;
 export type PromptLibraryCreateInput = z.infer<typeof promptLibraryCreateSchema>;
 export type PromptLibraryUpdateInput = z.infer<typeof promptLibraryUpdateSchema>;
 export type PromptCategoryCreateInput = z.infer<typeof promptCategoryCreateSchema>;

@@ -123,8 +123,7 @@
   color: var(--fg);
 }
 
-.task-label-editor__clear:focus-visible,
-.label-chip__remove:focus-visible {
+.task-label-editor__clear:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -139,35 +138,6 @@
 .task-label-editor__empty {
   color: var(--fg-faint);
   font-size: var(--fs-12);
-}
-
-.editable-label-chip {
-  display: inline-flex;
-  align-items: center;
-}
-
-.editable-label-chip .label-chip {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.label-chip__remove {
-  display: inline-grid;
-  width: 20px;
-  height: 21px;
-  place-items: center;
-  border: 1px solid var(--line-faint);
-  border-left: 0;
-  border-radius: 0 var(--r-sm) var(--r-sm) 0;
-  background: var(--bg-surface-2);
-  color: var(--fg-faint);
-  cursor: pointer;
-  padding: 0;
-}
-
-.label-chip__remove:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
 }
 
 .task-description {
