@@ -2,17 +2,13 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboa
 import type { ProjectTreeItem, SearchResult, SearchSourceType, Task } from "../../domain/types";
 import { Icon, Kbd, Mono, type IconName } from "../ui";
 import { useSearch, type SearchFilters } from "../../features/search/useSearch";
+import { looksLikeTaskId } from "../../features/tasks/task-metadata";
 
 const SIDEBAR_RESULT_LIMIT = 5;
 const TASK_ID_SEARCH_MIN_LENGTH = 6;
-// A humanized task ID, or a trailing part of one: slug words ending in the
-// 6-character suffix (`scope-sidebar-search-to-90rvs4`, `to-90rvs4`).
-const HUMANIZED_TASK_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*-[a-z0-9]{6}$/i;
-// A bare suffix (`90rvs4`) only counts when it mixes letters and digits, so
-// ordinary 6-letter words still search the scoped project.
+// A bare task ID suffix (`90rvs4`) only counts when it mixes letters and
+// digits, so ordinary 6-letter words still search the scoped project.
 const TASK_ID_SUFFIX_PATTERN = /^(?=[a-z0-9]*[0-9])(?=[a-z0-9]*[a-z])[a-z0-9]{6}$/i;
-// Tasks created before humanized IDs carry 21-character nanoid IDs.
-const NANOID_TASK_ID_PATTERN = /^(?=[A-Za-z0-9_-]*[A-Z0-9])[A-Za-z0-9_-]{21}$/;
 
 export function SidebarSearch({
   activeBoardId,
@@ -64,14 +60,28 @@ export function SidebarSearch({
     [activeBoardId, scope.projectId],
   );
 
-  const { results, loading, error, lastQuery } = useSearch({
+  const { results, loading, error, lastQuery, resultFilters } = useSearch({
     query,
     filters,
     enabled: runSearchApi,
   });
+  // Rows fetched under another scope must not linger under the new scope row.
+  const staleScope = resultFilters !== filters;
+  const searching = loading || staleScope;
 
   const showPopover = open && trimmed.length > 0;
-  const visibleResults = useMemo(() => results.slice(0, SIDEBAR_RESULT_LIMIT), [results]);
+  const visibleResults = useMemo(
+    () => (staleScope ? [] : results.slice(0, SIDEBAR_RESULT_LIMIT)),
+    [results, staleScope],
+  );
+
+  // Widening to all projects lasts only while the popover is showing; clearing
+  // the query, Escape, or a click outside starts the next search scoped again.
+  useEffect(() => {
+    if (!showPopover) {
+      setAllProjects(false);
+    }
+  }, [showPopover]);
 
   useEffect(() => {
     setHighlight(0);
@@ -187,13 +197,7 @@ export function SidebarSearch({
           aria-label="Search tasks, boards, comments"
           className="sidebar__search-input"
           onChange={(event) => setQuery(event.target.value)}
-          onFocus={() => {
-            // Each new popover starts scoped to the project again.
-            if (!open) {
-              setAllProjects(false);
-            }
-            setOpen(true);
-          }}
+          onFocus={() => setOpen(true)}
           onKeyDown={handleKeyDown}
           placeholder="Search..."
           ref={inputRef}
@@ -231,13 +235,13 @@ export function SidebarSearch({
               )}
             </div>
           )}
-          {loading && visibleResults.length === 0 && (
+          {searching && visibleResults.length === 0 && (
             <div className="search-popover__status">Searching...</div>
           )}
-          {!loading && error && (
+          {!searching && error && (
             <div className="search-popover__status search-popover__status--error">{error}</div>
           )}
-          {!loading && !error && visibleResults.length === 0 && lastQuery && (
+          {!searching && !error && visibleResults.length === 0 && lastQuery && (
             <div className="search-popover__status">No matches for "{lastQuery}".</div>
           )}
           {visibleResults.map((result, index) => (
@@ -358,7 +362,7 @@ export function resolveSidebarSearchScope({
     return { project: scopedProject, projectId: null, mode: "all" };
   }
   // A pasted task ID should open its task whichever project it belongs to.
-  if (looksLikeTaskId(query)) {
+  if (looksLikeTaskIdQuery(query)) {
     return { project: scopedProject, projectId: null, mode: "task-id" };
   }
   return { project: scopedProject, projectId: project.id, mode: "project" };
@@ -378,13 +382,12 @@ export function buildSidebarSearchFilters({
   };
 }
 
-export function looksLikeTaskId(query: string) {
+// A full task ID in either shape, a trailing part of a humanized one
+// (`to-90rvs4`), or a bare suffix. The API matches IDs case-insensitively, so
+// typed upper case still counts.
+export function looksLikeTaskIdQuery(query: string) {
   const trimmed = query.trim();
-  return (
-    HUMANIZED_TASK_ID_PATTERN.test(trimmed) ||
-    TASK_ID_SUFFIX_PATTERN.test(trimmed) ||
-    NANOID_TASK_ID_PATTERN.test(trimmed)
-  );
+  return looksLikeTaskId(trimmed.toLowerCase()) || TASK_ID_SUFFIX_PATTERN.test(trimmed);
 }
 
 export function shouldRunSidebarSearchApi({

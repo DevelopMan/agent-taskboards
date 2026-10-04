@@ -3,7 +3,7 @@ import type { ProjectTreeItem, Task } from "../../domain/types";
 import {
   buildSidebarSearchFilters,
   findCurrentBoardTaskIdMatch,
-  looksLikeTaskId,
+  looksLikeTaskIdQuery,
   resolveSidebarSearchScope,
   shouldRunSidebarSearchApi,
   taskToSearchResult,
@@ -134,16 +134,16 @@ describe("SidebarSearch project scope", () => {
   });
 
   it("recognizes task IDs and their trailing parts but not plain words", () => {
-    expect(looksLikeTaskId("scope-sidebar-search-to-90rvs4")).toBe(true);
-    expect(looksLikeTaskId(" SCOPE-SIDEBAR-SEARCH-TO-90RVS4 ")).toBe(true);
-    expect(looksLikeTaskId("to-90rvs4")).toBe(true);
-    expect(looksLikeTaskId("90rvs4")).toBe(true);
-    expect(looksLikeTaskId("V1StGXR8_Z5jdHi6B-myT")).toBe(true);
+    expect(looksLikeTaskIdQuery("scope-sidebar-search-to-90rvs4")).toBe(true);
+    expect(looksLikeTaskIdQuery(" SCOPE-SIDEBAR-SEARCH-TO-90RVS4 ")).toBe(true);
+    expect(looksLikeTaskIdQuery("to-90rvs4")).toBe(true);
+    expect(looksLikeTaskIdQuery("90rvs4")).toBe(true);
+    expect(looksLikeTaskIdQuery("V1StGXR8_Z5jdHi6B-myT")).toBe(true);
+    expect(looksLikeTaskIdQuery("abcdefghij_klmnopqrst")).toBe(true);
 
-    expect(looksLikeTaskId("sqlite")).toBe(false);
-    expect(looksLikeTaskId("sqlite migrations")).toBe(false);
-    expect(looksLikeTaskId("search-scope")).toBe(false);
-    expect(looksLikeTaskId("documentation-updates")).toBe(false);
+    expect(looksLikeTaskIdQuery("sqlite")).toBe(false);
+    expect(looksLikeTaskIdQuery("sqlite migrations")).toBe(false);
+    expect(looksLikeTaskIdQuery("search-scope")).toBe(false);
   });
 
   it("builds search filters with the scoped project and preferred board", () => {
