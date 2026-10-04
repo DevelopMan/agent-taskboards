@@ -559,24 +559,26 @@ export function BoardWorkspace({
                 </>
               )}
               <span className="subtoolbar__spacer" />
-              <span className="toolbar-label">Tags</span>
-              <TagFilter
-                labels={boardLabels}
-                match={tagFilter.match}
-                onChange={setTagFilter}
-                selected={tagFilter.tags}
-              />
-              <span className="toolbar-label">Sort</span>
-              <select
-                aria-label="Sort tasks"
-                className="small-select"
-                onChange={(event) => setSortPreference(event.target.value as BoardSortKey)}
-                value={sortKey}
-              >
-                {boardSortOptions.map((option) => (
-                  <option key={option.key} value={option.key}>{option.label}</option>
-                ))}
-              </select>
+              <div className="subtoolbar__view-controls">
+                <span className="toolbar-label">Tags</span>
+                <TagFilter
+                  labels={boardLabels}
+                  match={tagFilter.match}
+                  onChange={setTagFilter}
+                  selected={tagFilter.tags}
+                />
+                <span className="toolbar-label">Sort</span>
+                <select
+                  aria-label="Sort tasks"
+                  className="small-select"
+                  onChange={(event) => setSortPreference(event.target.value as BoardSortKey)}
+                  value={sortKey}
+                >
+                  {boardSortOptions.map((option) => (
+                    <option key={option.key} value={option.key}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             {showInitialSkeleton ? (
               <BoardColumnsSkeleton />

@@ -56,6 +56,10 @@ The board view should make task state easy to scan and change:
   to the filter instead of opening the task. The filter lives in memory for the
   current board and resets when switching boards. Hidden cards keep their
   stored positions: drops are still planned against the full column
+- while a task detail is open and the window is narrower than 1910px, the
+  board sub-toolbar hides the `Tags` filter and `Sort` controls to make room;
+  an active filter and sort keep applying, and the summary still reads
+  `N of M tasks`
 
 The UI should keep movement semantics aligned with the API. Moving a card in the
 UI should map to the same explicit task move operation that agents use.

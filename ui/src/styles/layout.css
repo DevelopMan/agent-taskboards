@@ -383,6 +383,16 @@
 .timeline-entry__spacer {
   flex: 1;
 }
+
+.subtoolbar__view-controls {
+  display: contents;
+}
+
+@media (width < 1910px) {
+  .board-layout--detail .subtoolbar__view-controls {
+    display: none;
+  }
+}
 .sheet-backdrop {
   position: fixed;
   z-index: 20;
