@@ -79,6 +79,10 @@ export function App() {
         ? route.projectIds[0]
         : null;
   const activeBoardId = route.view === "board" ? route.boardId : null;
+  // The sidebar search is scoped only by a project the URL names, never by the
+  // remembered project the sidebar falls back to.
+  const searchScopeProjectId =
+    activeProjectId ?? (route.view === "search" ? route.projectId : null);
   const activeTaskId = route.view === "board" ? route.taskId : null;
   const health = useHealth();
   const {
@@ -305,7 +309,7 @@ export function App() {
       return;
     }
     if (nextView === "search") {
-      navigate({ view: "search", query: null, tags: [], tagMatch: "all" });
+      navigate({ view: "search", query: null, tags: [], tagMatch: "all", projectId: null });
       return;
     }
     navigate({ view: nextView });
@@ -329,8 +333,8 @@ export function App() {
   );
 
   const handleSearchSubmit = useCallback(
-    (nextQuery: string) => {
-      navigate({ view: "search", query: nextQuery, tags: [], tagMatch: "all" });
+    (nextQuery: string, projectId: string | null) => {
+      navigate({ view: "search", query: nextQuery, tags: [], tagMatch: "all", projectId });
     },
     [navigate],
   );
@@ -344,7 +348,7 @@ export function App() {
 
   const openTagSearch = useCallback(
     (label: string) => {
-      navigate({ view: "search", query: null, tags: [label], tagMatch: "all" });
+      navigate({ view: "search", query: null, tags: [label], tagMatch: "all", projectId: null });
     },
     [navigate],
   );
@@ -371,6 +375,7 @@ export function App() {
         }}
         onSelectView={selectView}
         projectTree={displayedProjectTree}
+        searchScopeProjectId={searchScopeProjectId}
         selectedBoardId={selectedBoardId}
         tasks={tasks}
         view={view}
@@ -547,6 +552,7 @@ export function App() {
         )}
         {view === "search" && (
           <SearchWorkspace
+            initialProjectId={route.view === "search" ? route.projectId : null}
             initialQuery={route.view === "search" ? route.query : null}
             initialTagMatch={route.view === "search" ? route.tagMatch : "all"}
             initialTags={route.view === "search" ? route.tags : noSearchTags}

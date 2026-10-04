@@ -18,6 +18,7 @@ export function Sidebar({
   onSelectProject,
   onSelectView,
   projectTree,
+  searchScopeProjectId,
   selectedBoardId,
   tasks,
   view,
@@ -30,11 +31,12 @@ export function Sidebar({
   onCreateProject: () => void;
   onNavigateHome: () => void;
   onOpenSearchResult: (result: SearchResult) => void;
-  onSearchSubmit: (query: string) => void;
+  onSearchSubmit: (query: string, projectId: string | null) => void;
   onSelectBoard: (projectId: string, boardId: string) => void;
   onSelectProject: (projectId: string) => void;
   onSelectView: (view: View) => void;
   projectTree: ProjectTreeItem[];
+  searchScopeProjectId: string | null;
   selectedBoardId: string | null;
   tasks: Task[];
   view: View;
@@ -81,6 +83,7 @@ export function Sidebar({
         onOpenResult={onOpenSearchResult}
         onSubmitQuery={onSearchSubmit}
         projectTree={projectTree}
+        scopeProjectId={searchScopeProjectId}
       />
       <nav className="sidebar__nav">
         <NavItem active={view === "board"} count={projectTree.length} icon="board" label="Boards" onClick={() => onSelectView("board")} />

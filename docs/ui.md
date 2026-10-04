@@ -128,6 +128,19 @@ Search should support both human recall and agent memory inspection:
 Search results should link directly to the relevant project, board, task, or
 comment context.
 
+The sidebar search box (`/` focuses it) shows the top five results in a
+popover. When the URL names a project (a board or project page, an activity
+feed filtered to one project, or a search page with a project filter), the
+search covers only that project, and a row at the top of the popover says
+`In <project>` with an `All projects` toggle. Widening lasts until the popover
+closes; the next search starts scoped again. On other pages the sidebar
+searches all projects and shows no scope row. A query shaped like a task ID,
+or its trailing part such as `to-90rvs4`, always searches all projects so a
+pasted ID opens its task wherever it lives. Pressing Enter or
+`View all results` opens the search view with the same project selected. The
+search view's project filter lives in the URL as `projectId`
+(`/search?q=…&projectId=…`).
+
 The `Tags` filter is a type-ahead field over the labels in use
 (`GET /api/labels`, scoped to the selected project). Typing suggests matching
 tags, prefix matches first, with their task counts. Enter or a click adds the

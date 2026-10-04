@@ -53,6 +53,40 @@
   box-shadow: var(--shadow-pop);
 }
 
+.search-popover__scope {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-surface-2);
+  color: var(--fg-muted);
+  font-size: var(--fs-11);
+}
+
+.search-popover__scope-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-popover__scope-toggle {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--fs-11);
+  cursor: pointer;
+}
+
+.search-popover__scope-toggle:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
 .search-popover__status {
   padding: var(--s-3);
   color: var(--fg-muted);

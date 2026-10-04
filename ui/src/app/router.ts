@@ -7,7 +7,13 @@ export type AppRoute =
   | { view: "activity"; projectIds: string[]; sort: "asc" | "desc" }
   | { view: "board"; projectId: string | null; boardId: string | null; taskId: string | null }
   | { view: "projects"; projectId: string | null }
-  | { view: "search"; query: string | null; tags: string[]; tagMatch: LabelMatchMode }
+  | {
+      view: "search";
+      query: string | null;
+      tags: string[];
+      tagMatch: LabelMatchMode;
+      projectId: string | null;
+    }
   | { view: "prompts" }
   | { view: "maintenance" }
   | { view: "settings"; section: string };
@@ -48,6 +54,7 @@ export function parseRoute(
       query: trimmed ? trimmed : null,
       tags: normalizeLabelList(params.getAll("tag")),
       tagMatch: params.get("match") === "any" ? "any" : "all",
+      projectId: params.get("projectId")?.trim() || null,
     };
   }
 
@@ -98,6 +105,7 @@ export function routePath(route: AppRoute) {
       params.append("tag", tag);
     }
     if (route.tags.length > 0 && route.tagMatch !== "all") params.set("match", route.tagMatch);
+    if (route.projectId) params.set("projectId", route.projectId);
     const query = params.toString();
     return query ? `/search?${query}` : "/search";
   }

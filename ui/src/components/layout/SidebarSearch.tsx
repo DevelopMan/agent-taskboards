@@ -5,6 +5,14 @@ import { useSearch, type SearchFilters } from "../../features/search/useSearch";
 
 const SIDEBAR_RESULT_LIMIT = 5;
 const TASK_ID_SEARCH_MIN_LENGTH = 6;
+// A humanized task ID, or a trailing part of one: slug words ending in the
+// 6-character suffix (`scope-sidebar-search-to-90rvs4`, `to-90rvs4`).
+const HUMANIZED_TASK_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*-[a-z0-9]{6}$/i;
+// A bare suffix (`90rvs4`) only counts when it mixes letters and digits, so
+// ordinary 6-letter words still search the scoped project.
+const TASK_ID_SUFFIX_PATTERN = /^(?=[a-z0-9]*[0-9])(?=[a-z0-9]*[a-z])[a-z0-9]{6}$/i;
+// Tasks created before humanized IDs carry 21-character nanoid IDs.
+const NANOID_TASK_ID_PATTERN = /^(?=[A-Za-z0-9_-]*[A-Z0-9])[A-Za-z0-9_-]{21}$/;
 
 export function SidebarSearch({
   activeBoardId,
@@ -12,15 +20,18 @@ export function SidebarSearch({
   onOpenResult,
   onSubmitQuery,
   projectTree,
+  scopeProjectId,
 }: {
   activeBoardId: string | null;
   currentBoardTasks: Task[];
   onOpenResult: (result: SearchResult) => void;
-  onSubmitQuery: (query: string) => void;
+  onSubmitQuery: (query: string, projectId: string | null) => void;
   projectTree: ProjectTreeItem[];
+  scopeProjectId: string | null;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [allProjects, setAllProjects] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -34,12 +45,23 @@ export function SidebarSearch({
     open,
     query: trimmed,
   });
+  const scope = useMemo(
+    () =>
+      resolveSidebarSearchScope({
+        allProjects,
+        projectTree,
+        query: trimmed,
+        scopeProjectId,
+      }),
+    [allProjects, projectTree, scopeProjectId, trimmed],
+  );
   const filters = useMemo<SearchFilters>(
-    () => ({
-      limit: SIDEBAR_RESULT_LIMIT,
-      ...(activeBoardId ? { preferredBoardId: activeBoardId } : {}),
-    }),
-    [activeBoardId],
+    () =>
+      buildSidebarSearchFilters({
+        activeBoardId,
+        projectId: scope.projectId,
+      }),
+    [activeBoardId, scope.projectId],
   );
 
   const { results, loading, error, lastQuery } = useSearch({
@@ -115,7 +137,7 @@ export function SidebarSearch({
     }
     setOpen(false);
     inputRef.current?.blur();
-    onSubmitQuery(trimmed);
+    onSubmitQuery(trimmed, scope.projectId);
   }
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
@@ -165,7 +187,13 @@ export function SidebarSearch({
           aria-label="Search tasks, boards, comments"
           className="sidebar__search-input"
           onChange={(event) => setQuery(event.target.value)}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            // Each new popover starts scoped to the project again.
+            if (!open) {
+              setAllProjects(false);
+            }
+            setOpen(true);
+          }}
           onKeyDown={handleKeyDown}
           placeholder="Search..."
           ref={inputRef}
@@ -177,6 +205,32 @@ export function SidebarSearch({
       </div>
       {showPopover && (
         <div className="search-popover" role="listbox">
+          {scope.project && (
+            <div className="search-popover__scope">
+              <span className="search-popover__scope-label">
+                {scope.mode === "project" ? (
+                  <>
+                    In <Mono>{scope.project.name}</Mono>
+                  </>
+                ) : scope.mode === "task-id" ? (
+                  "Task ID in all projects"
+                ) : (
+                  "All projects"
+                )}
+              </span>
+              {scope.mode !== "task-id" && (
+                <button
+                  className="search-popover__scope-toggle"
+                  // Keep focus in the input so typing and arrow keys continue.
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => setAllProjects((current) => !current)}
+                  type="button"
+                >
+                  {scope.mode === "project" ? "All projects" : "Only this project"}
+                </button>
+              )}
+            </div>
+          )}
           {loading && visibleResults.length === 0 && (
             <div className="search-popover__status">Searching...</div>
           )}
@@ -272,6 +326,65 @@ export function findCurrentBoardTaskIdMatch(query: string, tasks: Task[]) {
     return null;
   }
   return tasks.find((task) => task.id.toLowerCase() === normalizedQuery) ?? null;
+}
+
+export type SidebarSearchScope = {
+  // The project the sidebar search is scoped to, when the route names a known one.
+  project: { id: string; name: string } | null;
+  // The project filter actually sent to the search API.
+  projectId: string | null;
+  mode: "none" | "project" | "all" | "task-id";
+};
+
+export function resolveSidebarSearchScope({
+  allProjects,
+  projectTree,
+  query,
+  scopeProjectId,
+}: {
+  allProjects: boolean;
+  projectTree: ProjectTreeItem[];
+  query: string;
+  scopeProjectId: string | null;
+}): SidebarSearchScope {
+  const project = scopeProjectId
+    ? projectTree.find((item) => item.project.id === scopeProjectId)?.project ?? null
+    : null;
+  if (!project) {
+    return { project: null, projectId: null, mode: "none" };
+  }
+  const scopedProject = { id: project.id, name: project.name };
+  if (allProjects) {
+    return { project: scopedProject, projectId: null, mode: "all" };
+  }
+  // A pasted task ID should open its task whichever project it belongs to.
+  if (looksLikeTaskId(query)) {
+    return { project: scopedProject, projectId: null, mode: "task-id" };
+  }
+  return { project: scopedProject, projectId: project.id, mode: "project" };
+}
+
+export function buildSidebarSearchFilters({
+  activeBoardId,
+  projectId,
+}: {
+  activeBoardId: string | null;
+  projectId: string | null;
+}): SearchFilters {
+  return {
+    limit: SIDEBAR_RESULT_LIMIT,
+    ...(projectId ? { projectId } : {}),
+    ...(activeBoardId ? { preferredBoardId: activeBoardId } : {}),
+  };
+}
+
+export function looksLikeTaskId(query: string) {
+  const trimmed = query.trim();
+  return (
+    HUMANIZED_TASK_ID_PATTERN.test(trimmed) ||
+    TASK_ID_SUFFIX_PATTERN.test(trimmed) ||
+    NANOID_TASK_ID_PATTERN.test(trimmed)
+  );
 }
 
 export function shouldRunSidebarSearchApi({

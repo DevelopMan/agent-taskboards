@@ -30,9 +30,11 @@ export interface SearchWorkspaceState {
   query: string | null;
   tags: string[];
   tagMatch: LabelMatchMode;
+  projectId: string | null;
 }
 
 export function SearchWorkspace({
+  initialProjectId,
   initialQuery,
   initialTagMatch,
   initialTags,
@@ -41,6 +43,7 @@ export function SearchWorkspace({
   preferredBoardId,
   projectTree,
 }: {
+  initialProjectId: string | null;
   initialQuery: string | null;
   initialTagMatch: LabelMatchMode;
   initialTags: string[];
@@ -53,13 +56,14 @@ export function SearchWorkspace({
   const [tags, setTags] = useState(initialTags);
   const [tagMatch, setTagMatch] = useState(initialTagMatch);
   const [availableTags, setAvailableTags] = useState<LabelCount[]>([]);
-  const [projectId, setProjectId] = useState<string>("");
+  const [projectId, setProjectId] = useState<string>(initialProjectId ?? "");
   const [enabledSources, setEnabledSources] = useState<Set<SearchSourceType>>(
     () => new Set(ALL_SOURCE_TYPES),
   );
   const [includeArchived, setIncludeArchived] = useState(false);
   const lastInitialQueryRef = useRef(initialQuery ?? "");
   const lastInitialTagsRef = useRef(tagStateKey(initialTags, initialTagMatch));
+  const lastInitialProjectIdRef = useRef(initialProjectId ?? "");
 
   useEffect(() => {
     const next = initialQuery ?? "";
@@ -77,6 +81,14 @@ export function SearchWorkspace({
       setTagMatch(initialTagMatch);
     }
   }, [initialTagMatch, initialTags]);
+
+  useEffect(() => {
+    const next = initialProjectId ?? "";
+    if (next !== lastInitialProjectIdRef.current) {
+      lastInitialProjectIdRef.current = next;
+      setProjectId(next);
+    }
+  }, [initialProjectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,10 +130,15 @@ export function SearchWorkspace({
   useEffect(() => {
     const trimmed = query.trim();
     const handle = window.setTimeout(() => {
-      onSearchChange({ query: trimmed ? trimmed : null, tags, tagMatch });
+      onSearchChange({
+        query: trimmed ? trimmed : null,
+        tags,
+        tagMatch,
+        projectId: projectId || null,
+      });
     }, URL_DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
-  }, [query, onSearchChange, tagMatch, tags]);
+  }, [query, onSearchChange, projectId, tagMatch, tags]);
 
   const crumbLookup = useMemo(() => {
     const projectNames = new Map<string, string>();
@@ -170,6 +187,11 @@ export function SearchWorkspace({
                   value={projectId}
                 >
                   <option value="">All projects</option>
+                  {projectId &&
+                    !projectTree.some((item) => item.project.id === projectId) && (
+                      // A URL may name a project that is archived or not loaded yet.
+                      <option value={projectId}>{projectId}</option>
+                    )}
                   {projectTree.map((item) => (
                     <option key={item.project.id} value={item.project.id}>
                       {item.project.name}
