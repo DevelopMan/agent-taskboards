@@ -420,11 +420,18 @@ Returns task context for handoff or implementation. Supports:
 ?include=comments,activity,metadata,externalReferences
 ?commentLimit=20
 ?activityLimit=20
+?commentSort=asc|desc
 ```
 
 Default behavior should include the task, parent project and board, ordered
-workflow columns, recent comments, recent activity, and truncation notices. Full
-comments and activity require explicit `include` or `view=full`.
+workflow columns, the first `commentLimit` comments, the first `activityLimit`
+activity entries, and truncation notices. Full comments and activity require
+explicit `include` or `view=full`.
+
+Comments and activity are oldest first. `commentSort=desc` returns the newest
+`commentLimit` comments, newest first, and the comments truncation next call
+keeps `sort=desc`. Activity order is fixed. Any other `commentSort` value
+returns `invalid_request`.
 
 ### `GET /api/agents/tasks/:taskId/comments`
 

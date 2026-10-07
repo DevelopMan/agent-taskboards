@@ -48,6 +48,7 @@ import {
   agentCommentListQuerySchema,
   agentReadQuerySchema,
   agentSearchQuerySchema,
+  agentTaskContextQuerySchema,
   agentTaskListQuerySchema,
   type AgentCommentListQuery,
   type AgentFormat,
@@ -835,11 +836,12 @@ export function registerAgentRoutes(app: Express, options: AgentRouteOptions) {
   });
 
   app.get("/api/agents/tasks/:taskId/context", (req, res) => {
-    const query = parseQuery(req, agentReadQuerySchema);
+    const query = parseQuery(req, agentTaskContextQuerySchema);
     const context = loadTaskWithParents(
       services,
       req.params.taskId,
       query.includeArchived,
+      query.commentSort,
     );
     const commentPage = limitCollection(context.comments, query.commentLimit);
     const activityPage = limitCollection(context.activity, query.activityLimit);
@@ -863,7 +865,7 @@ export function registerAgentRoutes(app: Express, options: AgentRouteOptions) {
               ...truncationLines(
                 includeComments && commentPage.truncated,
                 "comments",
-                `GET /api/agents/tasks/${context.task.id}/comments?offset=${query.commentLimit}&limit=${query.commentLimit}`,
+                `GET /api/agents/tasks/${context.task.id}/comments?offset=${query.commentLimit}&limit=${query.commentLimit}${query.commentSort === "desc" ? "&sort=desc" : ""}`,
               ),
               ...truncationLines(
                 includeActivity && activityPage.truncated,

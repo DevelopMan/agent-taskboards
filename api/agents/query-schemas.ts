@@ -85,10 +85,16 @@ export const agentReadQuerySchema = z.object({
   repositoryPath: queryString,
 });
 
+const querySort = z
+  .preprocess(firstQueryValue, z.enum(["asc", "desc"]).optional())
+  .transform((value) => value ?? "asc");
+
 export const agentCommentListQuerySchema = agentReadQuerySchema.extend({
-  sort: z
-    .preprocess(firstQueryValue, z.enum(["asc", "desc"]).optional())
-    .transform((value) => value ?? "asc"),
+  sort: querySort,
+});
+
+export const agentTaskContextQuerySchema = agentReadQuerySchema.extend({
+  commentSort: querySort,
 });
 
 export const agentTaskListQuerySchema = agentReadQuerySchema.extend({

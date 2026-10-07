@@ -440,6 +440,55 @@ describe("agent markdown API", () => {
     expect(invalid.text).toContain("invalid_request");
   });
 
+  it("sorts task context comments by commentSort and keeps it in the next call", async () => {
+    const { projectId, boardId } = await createProjectAndBoard();
+    const taskId = await createTask(projectId, boardId, { title: "Context comments" });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      for (const [index, body] of ["First", "Second", "Third"].entries()) {
+        vi.setSystemTime(new Date(Date.UTC(2026, 0, 1, 0, 0, index)));
+        await api("POST", `/api/agents/tasks/${taskId}/comments`, {
+          authorType: "agent",
+          body,
+        });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const commentOrder = (text: string) =>
+      ["First", "Second", "Third"]
+        .filter((body) => text.includes(`\n${body}\n`) || text.endsWith(`\n${body}`))
+        .sort((left, right) => text.indexOf(`\n${left}`) - text.indexOf(`\n${right}`));
+
+    const defaultOrder = await api(
+      "GET",
+      `/api/agents/tasks/${taskId}/context?include=comments&commentLimit=2`,
+    );
+    expect(commentOrder(defaultOrder.text)).toEqual(["First", "Second"]);
+    expect(defaultOrder.text).toContain(
+      `GET /api/agents/tasks/${taskId}/comments?offset=2&limit=2\``,
+    );
+
+    const descending = await api(
+      "GET",
+      `/api/agents/tasks/${taskId}/context?include=comments&commentLimit=2&commentSort=desc`,
+    );
+    expect(commentOrder(descending.text)).toEqual(["Third", "Second"]);
+    expect(descending.text).toContain("- Comments returned: 2 of 3.");
+    expect(descending.text).toContain(
+      `GET /api/agents/tasks/${taskId}/comments?offset=2&limit=2&sort=desc`,
+    );
+
+    const invalid = await api(
+      "GET",
+      `/api/agents/tasks/${taskId}/context?commentSort=newest`,
+    );
+    expect(invalid.status).toBe(400);
+    expect(invalid.text).toContain("invalid_request");
+  });
+
   it("moves a task to a sibling board and reports the resulting context", async () => {
     const { projectId, boardId } = await createProjectAndBoard();
     const targetBoard = objectProp(
