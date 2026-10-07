@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { createDatabaseClient, type DatabaseClient } from "./db/client.js";
 import { runMigrations } from "./db/migrate.js";
@@ -375,6 +375,69 @@ describe("agent markdown API", () => {
 
     const archive = await api("POST", `/api/agents/tasks/${taskId}/archive`);
     expect(archive.text).toContain("Comments and activity remain attached.");
+  });
+
+  it("lists agent comments in the requested sort order with sorted next calls", async () => {
+    const { projectId, boardId } = await createProjectAndBoard();
+    const taskId = await createTask(projectId, boardId, { title: "Sorted comments" });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      for (const [index, body] of ["First", "Second", "Third"].entries()) {
+        vi.setSystemTime(new Date(Date.UTC(2026, 0, 1, 0, 0, index)));
+        await api("POST", `/api/agents/tasks/${taskId}/comments`, {
+          authorType: "agent",
+          body,
+        });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const bodies = (response: Awaited<ReturnType<TestApi>>) =>
+      arrayProp(jsonBlock(response.text), "comments").map((item) =>
+        stringProp(asObject(item), "body"),
+      );
+
+    const defaultOrder = await api(
+      "GET",
+      `/api/agents/tasks/${taskId}/comments?format=json`,
+    );
+    expect(bodies(defaultOrder)).toEqual(["First", "Second", "Third"]);
+    expect(
+      stringProp(objectProp(jsonBlock(defaultOrder.text), "result"), "sort"),
+    ).toBe("asc");
+
+    const descending = await api(
+      "GET",
+      `/api/agents/tasks/${taskId}/comments?sort=desc&limit=2&format=json`,
+    );
+    expect(bodies(descending)).toEqual(["Third", "Second"]);
+    expect(descending.text).toContain(
+      `GET /api/agents/tasks/${taskId}/comments?offset=2&limit=2&sort=desc`,
+    );
+
+    const nextPage = await api(
+      "GET",
+      `/api/agents/tasks/${taskId}/comments?sort=desc&offset=2&limit=2&format=json`,
+    );
+    expect(bodies(nextPage)).toEqual(["First"]);
+
+    const ascendingPage = await api(
+      "GET",
+      `/api/agents/tasks/${taskId}/comments?sort=asc&limit=2&format=json`,
+    );
+    expect(bodies(ascendingPage)).toEqual(["First", "Second"]);
+    expect(ascendingPage.text).toContain(
+      `GET /api/agents/tasks/${taskId}/comments?offset=2&limit=2\``,
+    );
+
+    const invalid = await api(
+      "GET",
+      `/api/agents/tasks/${taskId}/comments?sort=newest`,
+    );
+    expect(invalid.status).toBe(400);
+    expect(invalid.text).toContain("invalid_request");
   });
 
   it("moves a task to a sibling board and reports the resulting context", async () => {

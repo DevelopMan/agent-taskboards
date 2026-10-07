@@ -428,7 +428,11 @@ comments and activity require explicit `include` or `view=full`.
 
 ### `GET /api/agents/tasks/:taskId/comments`
 
-Lists comments in creation order. Supports `limit`, `offset`, and `format`.
+Lists comments in creation order. Supports `limit`, `offset`, `sort`, and
+`format`. `sort` is `asc` by default (oldest first) and accepts `desc` (newest
+first); paging applies after sorting, and the truncation next call keeps
+`sort=desc`. The JSON `result` reports the applied `sort`. Any other value
+returns `invalid_request`.
 Comments should preserve author type, optional author name/ref, creation time,
 and body.
 
