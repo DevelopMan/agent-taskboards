@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { Task } from "../../domain/types";
+import type { ProjectTreeItem, Task } from "../../domain/types";
 import {
+  buildSidebarSearchFilters,
   findCurrentBoardTaskIdMatch,
+  looksLikeTaskIdQuery,
+  resolveSidebarSearchScope,
   shouldRunSidebarSearchApi,
   taskToSearchResult,
 } from "./SidebarSearch";
@@ -68,6 +71,108 @@ describe("SidebarSearch task ID helpers", () => {
     });
   });
 });
+
+describe("SidebarSearch project scope", () => {
+  const projectTree = [projectTreeItem("project-1", "agent-taskboards")];
+
+  it("scopes to the route project when it is a known project", () => {
+    expect(
+      resolveSidebarSearchScope({
+        allProjects: false,
+        projectTree,
+        query: "sqlite migrations",
+        scopeProjectId: "project-1",
+      }),
+    ).toEqual({
+      project: { id: "project-1", name: "agent-taskboards" },
+      projectId: "project-1",
+      mode: "project",
+    });
+  });
+
+  it("searches all projects without a known route project", () => {
+    const unscoped = { project: null, projectId: null, mode: "none" };
+
+    expect(
+      resolveSidebarSearchScope({
+        allProjects: false,
+        projectTree,
+        query: "sqlite",
+        scopeProjectId: null,
+      }),
+    ).toEqual(unscoped);
+    expect(
+      resolveSidebarSearchScope({
+        allProjects: false,
+        projectTree,
+        query: "sqlite",
+        scopeProjectId: "archived-project",
+      }),
+    ).toEqual(unscoped);
+  });
+
+  it("drops the project filter when widened to all projects", () => {
+    expect(
+      resolveSidebarSearchScope({
+        allProjects: true,
+        projectTree,
+        query: "sqlite",
+        scopeProjectId: "project-1",
+      }),
+    ).toMatchObject({ projectId: null, mode: "all" });
+  });
+
+  it("drops the project filter for task-ID-shaped queries", () => {
+    expect(
+      resolveSidebarSearchScope({
+        allProjects: false,
+        projectTree,
+        query: "scope-sidebar-search-to-90rvs4",
+        scopeProjectId: "project-1",
+      }),
+    ).toMatchObject({ projectId: null, mode: "task-id" });
+  });
+
+  it("recognizes task IDs and their trailing parts but not plain words", () => {
+    expect(looksLikeTaskIdQuery("scope-sidebar-search-to-90rvs4")).toBe(true);
+    expect(looksLikeTaskIdQuery(" SCOPE-SIDEBAR-SEARCH-TO-90RVS4 ")).toBe(true);
+    expect(looksLikeTaskIdQuery("to-90rvs4")).toBe(true);
+    expect(looksLikeTaskIdQuery("90rvs4")).toBe(true);
+    expect(looksLikeTaskIdQuery("V1StGXR8_Z5jdHi6B-myT")).toBe(true);
+    expect(looksLikeTaskIdQuery("abcdefghij_klmnopqrst")).toBe(true);
+
+    expect(looksLikeTaskIdQuery("sqlite")).toBe(false);
+    expect(looksLikeTaskIdQuery("sqlite migrations")).toBe(false);
+    expect(looksLikeTaskIdQuery("search-scope")).toBe(false);
+  });
+
+  it("builds search filters with the scoped project and preferred board", () => {
+    expect(
+      buildSidebarSearchFilters({ activeBoardId: "board-1", projectId: "project-1" }),
+    ).toEqual({ limit: 5, projectId: "project-1", preferredBoardId: "board-1" });
+    expect(buildSidebarSearchFilters({ activeBoardId: null, projectId: null })).toEqual({
+      limit: 5,
+    });
+  });
+});
+
+function projectTreeItem(id: string, name: string): ProjectTreeItem {
+  return {
+    project: {
+      id,
+      name,
+      description: null,
+      repositoryPath: null,
+      defaultBranch: null,
+      metadata: {},
+      archivedAt: null,
+      createdAt: null,
+      updatedAt: null,
+    },
+    boards: [],
+    taskCount: null,
+  };
+}
 
 function task(overrides: Partial<Task>): Task {
   return {

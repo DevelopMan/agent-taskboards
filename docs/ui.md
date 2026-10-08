@@ -56,6 +56,10 @@ The board view should make task state easy to scan and change:
   to the filter instead of opening the task. The filter lives in memory for the
   current board and resets when switching boards. Hidden cards keep their
   stored positions: drops are still planned against the full column
+- while a task detail is open and the window is narrower than 1910px, the
+  board sub-toolbar hides the `Tags` filter and `Sort` controls to make room;
+  an active filter and sort keep applying, and the summary still reads
+  `N of M tasks`
 
 The UI should keep movement semantics aligned with the API. Moving a card in the
 UI should map to the same explicit task move operation that agents use.
@@ -127,6 +131,19 @@ Search should support both human recall and agent memory inspection:
 
 Search results should link directly to the relevant project, board, task, or
 comment context.
+
+The sidebar search box (`/` focuses it) shows the top five results in a
+popover. When the URL names a project (a board or project page, an activity
+feed filtered to one project, or a search page with a project filter), the
+search covers only that project, and a row at the top of the popover says
+`In <project>` with an `All projects` toggle. Widening lasts until the popover
+closes; the next search starts scoped again. On other pages the sidebar
+searches all projects and shows no scope row. A query shaped like a task ID,
+or its trailing part such as `to-90rvs4`, always searches all projects so a
+pasted ID opens its task wherever it lives. Pressing Enter or
+`View all results` opens the search view with the same project selected. The
+search view's project filter lives in the URL as `projectId`
+(`/search?q=…&projectId=…`).
 
 The `Tags` filter is a type-ahead field over the labels in use
 (`GET /api/labels`, scoped to the selected project). Typing suggests matching

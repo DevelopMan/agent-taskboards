@@ -17,6 +17,10 @@ export interface UseSearchState {
   loading: boolean;
   error: string | null;
   lastQuery: string | null;
+  // The filters that produced `results`. Results are kept while a new request
+  // is pending, so callers compare this with their current filters to tell
+  // whether the rows on screen still match them.
+  resultFilters: SearchFilters | undefined;
 }
 
 const DEFAULT_DEBOUNCE_MS = 250;
@@ -32,6 +36,7 @@ export function useSearch({
     loading: false,
     error: null,
     lastQuery: null,
+    resultFilters: filters,
   });
   const requestIdRef = useRef(0);
 
@@ -42,7 +47,13 @@ export function useSearch({
   useEffect(() => {
     if (!enabled || (!trimmed && !hasLabels)) {
       requestIdRef.current += 1;
-      setState({ results: [], loading: false, error: null, lastQuery: null });
+      setState({
+        results: [],
+        loading: false,
+        error: null,
+        lastQuery: null,
+        resultFilters: filters,
+      });
       return;
     }
 
@@ -61,6 +72,7 @@ export function useSearch({
             loading: false,
             error: null,
             lastQuery: trimmed,
+            resultFilters: filters,
           });
         })
         .catch((err: unknown) => {
@@ -70,6 +82,7 @@ export function useSearch({
             loading: false,
             error: apiMessage(err),
             lastQuery: trimmed,
+            resultFilters: filters,
           });
         });
     }, debounceMs);

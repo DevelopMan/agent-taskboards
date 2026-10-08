@@ -2,9 +2,13 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboa
 import type { ProjectTreeItem, SearchResult, SearchSourceType, Task } from "../../domain/types";
 import { Icon, Kbd, Mono, type IconName } from "../ui";
 import { useSearch, type SearchFilters } from "../../features/search/useSearch";
+import { looksLikeTaskId } from "../../features/tasks/task-metadata";
 
 const SIDEBAR_RESULT_LIMIT = 5;
 const TASK_ID_SEARCH_MIN_LENGTH = 6;
+// A bare task ID suffix (`90rvs4`) only counts when it mixes letters and
+// digits, so ordinary 6-letter words still search the scoped project.
+const TASK_ID_SUFFIX_PATTERN = /^(?=[a-z0-9]*[0-9])(?=[a-z0-9]*[a-z])[a-z0-9]{6}$/i;
 
 export function SidebarSearch({
   activeBoardId,
@@ -12,15 +16,18 @@ export function SidebarSearch({
   onOpenResult,
   onSubmitQuery,
   projectTree,
+  scopeProjectId,
 }: {
   activeBoardId: string | null;
   currentBoardTasks: Task[];
   onOpenResult: (result: SearchResult) => void;
-  onSubmitQuery: (query: string) => void;
+  onSubmitQuery: (query: string, projectId: string | null) => void;
   projectTree: ProjectTreeItem[];
+  scopeProjectId: string | null;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [allProjects, setAllProjects] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -34,22 +41,47 @@ export function SidebarSearch({
     open,
     query: trimmed,
   });
+  const scope = useMemo(
+    () =>
+      resolveSidebarSearchScope({
+        allProjects,
+        projectTree,
+        query: trimmed,
+        scopeProjectId,
+      }),
+    [allProjects, projectTree, scopeProjectId, trimmed],
+  );
   const filters = useMemo<SearchFilters>(
-    () => ({
-      limit: SIDEBAR_RESULT_LIMIT,
-      ...(activeBoardId ? { preferredBoardId: activeBoardId } : {}),
-    }),
-    [activeBoardId],
+    () =>
+      buildSidebarSearchFilters({
+        activeBoardId,
+        projectId: scope.projectId,
+      }),
+    [activeBoardId, scope.projectId],
   );
 
-  const { results, loading, error, lastQuery } = useSearch({
+  const { results, loading, error, lastQuery, resultFilters } = useSearch({
     query,
     filters,
     enabled: runSearchApi,
   });
+  // Rows fetched under another scope must not linger under the new scope row.
+  const staleScope = resultFilters !== filters;
+  const searching = loading || staleScope;
 
   const showPopover = open && trimmed.length > 0;
-  const visibleResults = useMemo(() => results.slice(0, SIDEBAR_RESULT_LIMIT), [results]);
+  const visibleResults = useMemo(
+    () => (staleScope ? [] : results.slice(0, SIDEBAR_RESULT_LIMIT)),
+    [results, staleScope],
+  );
+
+  // Widening to all projects lasts only while the popover is showing; clearing
+  // the query, Escape, or a click outside starts the next search scoped again.
+  useEffect(() => {
+    if (!showPopover) {
+      setAllProjects(false);
+    }
+  }, [showPopover]);
 
   useEffect(() => {
     setHighlight(0);
@@ -115,7 +147,7 @@ export function SidebarSearch({
     }
     setOpen(false);
     inputRef.current?.blur();
-    onSubmitQuery(trimmed);
+    onSubmitQuery(trimmed, scope.projectId);
   }
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
@@ -177,13 +209,39 @@ export function SidebarSearch({
       </div>
       {showPopover && (
         <div className="search-popover" role="listbox">
-          {loading && visibleResults.length === 0 && (
+          {scope.project && (
+            <div className="search-popover__scope">
+              <span className="search-popover__scope-label">
+                {scope.mode === "project" ? (
+                  <>
+                    In <Mono>{scope.project.name}</Mono>
+                  </>
+                ) : scope.mode === "task-id" ? (
+                  "Task ID in all projects"
+                ) : (
+                  "All projects"
+                )}
+              </span>
+              {scope.mode !== "task-id" && (
+                <button
+                  className="search-popover__scope-toggle"
+                  // Keep focus in the input so typing and arrow keys continue.
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => setAllProjects((current) => !current)}
+                  type="button"
+                >
+                  {scope.mode === "project" ? "All projects" : "Only this project"}
+                </button>
+              )}
+            </div>
+          )}
+          {searching && visibleResults.length === 0 && (
             <div className="search-popover__status">Searching...</div>
           )}
-          {!loading && error && (
+          {!searching && error && (
             <div className="search-popover__status search-popover__status--error">{error}</div>
           )}
-          {!loading && !error && visibleResults.length === 0 && lastQuery && (
+          {!searching && !error && visibleResults.length === 0 && lastQuery && (
             <div className="search-popover__status">No matches for "{lastQuery}".</div>
           )}
           {visibleResults.map((result, index) => (
@@ -272,6 +330,64 @@ export function findCurrentBoardTaskIdMatch(query: string, tasks: Task[]) {
     return null;
   }
   return tasks.find((task) => task.id.toLowerCase() === normalizedQuery) ?? null;
+}
+
+export type SidebarSearchScope = {
+  // The project the sidebar search is scoped to, when the route names a known one.
+  project: { id: string; name: string } | null;
+  // The project filter actually sent to the search API.
+  projectId: string | null;
+  mode: "none" | "project" | "all" | "task-id";
+};
+
+export function resolveSidebarSearchScope({
+  allProjects,
+  projectTree,
+  query,
+  scopeProjectId,
+}: {
+  allProjects: boolean;
+  projectTree: ProjectTreeItem[];
+  query: string;
+  scopeProjectId: string | null;
+}): SidebarSearchScope {
+  const project = scopeProjectId
+    ? projectTree.find((item) => item.project.id === scopeProjectId)?.project ?? null
+    : null;
+  if (!project) {
+    return { project: null, projectId: null, mode: "none" };
+  }
+  const scopedProject = { id: project.id, name: project.name };
+  if (allProjects) {
+    return { project: scopedProject, projectId: null, mode: "all" };
+  }
+  // A pasted task ID should open its task whichever project it belongs to.
+  if (looksLikeTaskIdQuery(query)) {
+    return { project: scopedProject, projectId: null, mode: "task-id" };
+  }
+  return { project: scopedProject, projectId: project.id, mode: "project" };
+}
+
+export function buildSidebarSearchFilters({
+  activeBoardId,
+  projectId,
+}: {
+  activeBoardId: string | null;
+  projectId: string | null;
+}): SearchFilters {
+  return {
+    limit: SIDEBAR_RESULT_LIMIT,
+    ...(projectId ? { projectId } : {}),
+    ...(activeBoardId ? { preferredBoardId: activeBoardId } : {}),
+  };
+}
+
+// A full task ID in either shape, a trailing part of a humanized one
+// (`to-90rvs4`), or a bare suffix. The API matches IDs case-insensitively, so
+// typed upper case still counts.
+export function looksLikeTaskIdQuery(query: string) {
+  const trimmed = query.trim();
+  return looksLikeTaskId(trimmed.toLowerCase()) || TASK_ID_SUFFIX_PATTERN.test(trimmed);
 }
 
 export function shouldRunSidebarSearchApi({

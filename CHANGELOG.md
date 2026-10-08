@@ -14,6 +14,15 @@ Important changes to Agent Taskboards are documented in this file.
   `commentSort=asc|desc`, so `commentSort=desc` returns the newest
   `commentLimit` comments.
 
+### 2026-10-04
+
+- **Project-scoped sidebar search** (`scope-sidebar-search-to-90rvs4`): The
+  sidebar search covers only the project named in the URL, with an
+  `All projects` toggle in the popover that resets when it closes. Queries
+  shaped like task IDs still search every project. The search view keeps its
+  project filter in the URL (`projectId`), and opening it from the sidebar
+  carries the scope over.
+
 ### 2026-09-30
 
 - **Search by tags** (`add-search-by-tags-2r5elm`): The search view has a
